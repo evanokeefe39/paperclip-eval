@@ -253,6 +253,33 @@ function Run-Tier2 {
 
     if (-not $tier2HurlPassed) { return $false }
 
+    # --- Hurl extension tests ---
+    $extHurlFile = Join-Path $script:RepoRoot "tests\hurl\tier2-extensions.hurl"
+    if (Test-Path $extHurlFile) {
+        $timer = [System.Diagnostics.Stopwatch]::StartNew()
+        $savedEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $output = & hurl --test --file-root $script:RepoRoot $extHurlFile 2>&1
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $savedEAP
+        $timer.Stop()
+
+        if ($exitCode -eq 0) {
+            $extTests = @(
+                @{ Id = "2.8"; Name = "Extension web_fetch invocation" },
+                @{ Id = "2.9"; Name = "Extension error no crash" },
+                @{ Id = "2.10"; Name = "Both extensions available" }
+            )
+            $perTest = $timer.Elapsed.TotalSeconds / $extTests.Count
+            foreach ($t in $extTests) {
+                Write-TestResult -TestId $t.Id -Name $t.Name -Status "PASS" -DurationSec $perTest
+            }
+        } else {
+            Write-Host ($output -join "`n") -ForegroundColor Red
+            Write-TestResult -TestId "2.x-ext" -Name "Tier 2 extensions hurl" -Status "FAIL" -DurationSec $timer.Elapsed.TotalSeconds
+        }
+    }
+
     # --- Test 2.6: Concurrent agents (inline) ---
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
 

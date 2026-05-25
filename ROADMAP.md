@@ -32,14 +32,174 @@ Replace the shared Docker volume with MinIO (S3-compatible object storage) for i
 
 ---
 
+## Planned: Agent Roster
+
+Full agent lineup. Each agent runs in its own Docker container via bridge.mjs, registered to Paperclip via HTTP adapter.
+
+### Existing agents
+
+| Agent | Role | Extensions |
+|-------|------|-----------|
+| CEO | Strategic leadership, task decomposition, orchestration | — |
+| Researcher | Information gathering, structured research, source analysis | web_search, web_fetch |
+
+### New agents
+
+#### Coder
+
+Code execution, analysis, implementation tasks. Pi coding agent in container provides base isolation.
+
+**Extensions (later):**
+- Specialized coding skills TBD (linting, test generation, refactoring tools)
+- File system tools scoped to /workspace and /artifacts only
+
+**Security guardrails:**
+- Container runs as non-root user (no `--privileged`)
+- Read-only filesystem except `/workspace` (working dir) and `/artifacts` (shared output)
+- Resource limits: CPU (2 cores), memory (4GB), no swap
+- Network: egress restricted to internal Docker network + specific allowlisted domains (package registries)
+- No host volume mounts beyond workspace and artifacts
+- Execution timeout per invocation (configurable, default 5min)
+- No `docker.sock` access — cannot spawn sibling containers
+- `/workspace` wiped between invocations (ephemeral)
+- Stdout/stderr size cap to prevent memory exhaustion in bridge
+
+**Permissions:** read, write, execute within workspace. Read from /artifacts. Write to /artifacts/{own-context}/. No delete outside workspace.
+
+#### Data / Analyst
+
+Database operations, SQL queries, data management, web scraping, organizational data curation.
+
+**Extensions:**
+- `web-scraping.ts` — dual-mode: Apify CLI API for structured scraping (actor-based), Scrapling for custom/ad-hoc scraping
+- DB query tools (SQL execution against sandboxed read replicas)
+- Data transformation / ETL helpers
+
+**Permissions:** read/write to /artifacts. Query access to designated databases (read-only by default, write to staging tables only). Web egress for scraping targets. No code execution beyond SQL.
+
+**Responsibility:** Organizes and maintains structured data that other agents query. Owns the canonical data layer.
+
+#### Writer
+
+Transforms research findings into coherent narratives. Queries Researcher output, applies tone/voice/audience context.
+
+**Extensions:**
+- `org-data-query.ts` — read access to structured data curated by Data agent
+- Style guide reference tool (retrieves brand voice rules, audience profiles)
+- Citation formatter
+
+**Permissions:** read from /artifacts. Write to /artifacts/{own-context}/. No web access (works from pre-gathered material). No code execution. No file delete.
+
+**Pipeline position:** Downstream of Researcher. Upstream of QA.
+
+#### QA
+
+Evaluative gating agent. Never fixes work — only passes, fails, or escalates. Integrated with kaizen system.
+
+**Extensions:**
+- Branding guidelines checker (style, tone, formatting rules)
+- Coding standards validator (linting rules, architectural constraints)
+- Kaizen integration tool (logs rejections, tracks first-pass yield, triggers 5-whys on threshold breach)
+- Template conformance checker (structural validation per output type)
+
+**Permissions:** read from /artifacts (all agents' output). Write to /artifacts/qa/ (verdicts, rejection reports). No modify/delete of other agents' output. No web access. No code execution.
+
+**Behavior contract:** Every review produces a structured verdict: PASS / FAIL(reasons) / ESCALATE(question). Rejections include specific line references and the violated standard. Never rewrites — only flags.
+
+#### Publisher
+
+Publishing agent with HITL (human-in-the-loop) gating. Holds tools and credentials for external platforms.
+
+**Extensions:**
+- Social media publishing tools (platform-specific: LinkedIn, Twitter/X, etc.)
+- Email list integration (newsletter dispatch)
+- HITL approval gate — all publish actions require explicit human confirmation before execution
+- Scheduling tool (queue content for future publish times)
+- Platform analytics query (read engagement metrics post-publish)
+
+**Permissions:** read from /artifacts (QA-approved content only — checks QA verdict before proceeding). Write to /artifacts/publisher/ (publish receipts, analytics snapshots). External network egress to publishing platforms. No file delete. No code execution.
+
+**Security:** All publish actions gated by HITL confirmation. No autonomous publishing without human approval. Credentials stored in agent-specific auth, never shared. Rate limits per platform enforced in extension.
+
+---
+
+### Extension Roadmap
+
+#### deep-research.ts (Researcher)
+
+Wave-based iterative research adapted from agent-researcher (LangGraph → Pi extension).
+
+**Architecture:**
+1. Plan: decompose query into 3-6 non-overlapping sub-queries
+2. Search: execute sub-queries concurrently (snippet-level, 10 results each)
+3. Rank: score snippets, keep top-K for deep extraction
+4. Deep extract: fetch full pages for top-ranked URLs, chunk, extract findings
+5. Reflect: evaluate coverage, decide continue or finalize
+6. Loop (max 3 iterations) or finalize with structured findings collection
+
+**Key design decisions (from agent-researcher learnings):**
+- Structured output for all LLM extraction calls (reliable JSON)
+- Retry with jitter on all external calls (5 attempts)
+- Cache search results and page content (7-day TTL) for idempotent retries
+- Never silently embed errors — fail loud, let retry layers handle
+- Conservative iteration: reflect prompt biases toward termination after 1-2 waves
+- Model stratification: cheap model for ranking volume, mid for extraction, smart for plan/reflect
+
+**Config knobs:** max_iterations (3), max_sub_queries (6), snippet_results_per_query (10), top_k_urls_after_rank (5)
+
+#### web-scraping.ts (Data agent)
+
+Dual-mode scraping extension.
+
+**Mode 1 — Apify (structured):**
+- Actor-based: select actor by target site type, pass config, poll for results
+- Good for: social media, e-commerce, search engines, maps — anything with existing actors
+- Returns structured data (JSON arrays)
+
+**Mode 2 — Scrapling (custom):**
+- For sites without Apify actors or needing custom extraction logic
+- CSS/XPath selectors, pagination handling, JS rendering via headless browser
+- Returns extracted data in agent-specified schema
+
+**Tools registered:** `scrape_structured` (Apify path), `scrape_custom` (Scrapling path), `list_available_scrapers` (actor discovery)
+
+#### org-data-query.ts (Researcher, Writer)
+
+Query interface to organizational data maintained by Data agent.
+
+**Tools registered:** `query_org_data` (structured query against curated datasets), `list_datasets` (discover available data), `get_dataset_schema` (inspect structure before querying)
+
+**Security:** Read-only. No mutations. Results capped at configurable row limit.
+
+---
+
+### Security Model Summary
+
+| Agent | Code exec | Web egress | File delete | Publish | HITL required |
+|-------|-----------|-----------|-------------|---------|---------------|
+| CEO | No | No | No | No | No |
+| Researcher | No | Yes (search/fetch) | No | No | No |
+| Coder | Yes (sandboxed) | Limited (allowlist) | Workspace only | No | No |
+| Data | SQL only | Yes (scraping) | Workspace only | No | No |
+| Writer | No | No | No | No | No |
+| QA | No | No | No | No | No |
+| Publisher | No | Yes (platforms) | No | Yes | Yes |
+
+**Principle:** Least privilege. Each agent gets exactly the capabilities its role requires. Dangerous operations (publish, delete, external write) require either sandboxing or human approval. No agent can escalate its own permissions.
+
+---
+
 ## Planned: Toyota Way integration
 
 Implement TPS principles across the pipeline. Phased — each phase solves problems surfaced by the previous one.
 
-### Phase 1 — Complete the agent roster
+### Phase 1 — Stand up agent roster
 
-- Add QA agent (evaluative checks, pass/fail/escalate, never fixes work)
-- Add Publisher agent (research → platform-specific content, one sub-issue per platform)
+- Stub all agent directories (agent.json, .pi/agent/ configs, AGENTS.md)
+- Implement Coder container security (non-root, resource limits, network policy)
+- Build deep-research.ts extension for Researcher
+- Build web-scraping.ts extension for Data agent
+- Build org-data-query.ts extension for Researcher and Writer
 - Issue templates: research brief, QA review, publish brief (poka-yoke layer)
 - Goal hierarchy: company goal → research / content / distribution sub-goals
 - Pipeline operations project for meta-work and process improvements
