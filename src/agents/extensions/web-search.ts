@@ -36,7 +36,7 @@ export default function (pi: ExtensionAPI) {
 
       const body = {
         query: params.query,
-        numResults: params.num_results ?? 5,
+        numResults: 5,
         contents: {
           text: { maxCharacters: 1500 },
           highlights: { numSentences: 3 },

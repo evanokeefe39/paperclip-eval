@@ -17,6 +17,9 @@ src/agents/
   paperclip-config.json     Config template for Paperclip CLI compatibility
   .dockerignore             Excludes .env and non-build files from image context
   .env.example              Template for provider API keys
+  extensions/               Pi extensions loaded into all agent containers
+    web-search.ts           Exa-backed web search tool (registered as web_search)
+    web-fetch.ts            URL fetch tool with Jina Reader fallback (registered as web_fetch)
   ceo/                      CEO agent config and prompt
     agent.json              Agent registration metadata (name, role, adapter config)
     .pi/agent/config.yml
@@ -37,6 +40,7 @@ tests/results/               Timestamped test run reports
 .claude/skills/paperclip-api.md  API reference skill
 LEARNING.md                  Running log of issues and workarounds
 ROADMAP.md                   Planned improvements (MinIO, etc) — eval stage
+tasks/                       Plans, todos, lessons
 ```
 
 ## Project stage
@@ -57,6 +61,14 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - setup.sh is idempotent — safe to re-run. Skips existing companies/agents and prints their IDs
 - All setup config via env vars: PAPERCLIP_URL, ADMIN_EMAIL, ADMIN_PASS, COMPANY_NAME, COMPOSE_FILE, SKIP_BUILD
 - Adding a new agent: create a directory with .pi/agent/config.yml and agent.json, then re-run setup.sh
+
+## Agent web tools
+
+- Pi has no built-in web search — custom extensions at `src/agents/extensions/` provide `web_search` (Exa API) and `web_fetch` (direct + Jina Reader fallback)
+- Extensions loaded via `-e` flags in bridge.mjs spawn args, copied into container at `/app/extensions/`
+- Requires `EXA_API_KEY` env var in `.env`
+- DeepSeek handles tool calling reliably; Groq is flaky with function calls — avoid for agentic web search tasks
+- Test extensions locally via bash: `pi --mode json -e extensions/web-search.ts -p "query"` (PowerShell cannot capture Pi stdout)
 
 ## Inter-agent artifact sharing
 

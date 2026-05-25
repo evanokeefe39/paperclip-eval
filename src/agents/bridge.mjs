@@ -118,6 +118,8 @@ const server = http.createServer(async (req, res) => {
     "--no-session",
     "--provider", PI_PROVIDER,
     "--model", PI_MODEL,
+    "-e", "/app/extensions/web-search.ts",
+    "-e", "/app/extensions/web-fetch.ts",
     ...(systemPrompt ? ["--append-system-prompt", systemPrompt] : []),
   ];
 

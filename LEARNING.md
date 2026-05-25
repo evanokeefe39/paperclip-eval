@@ -342,3 +342,95 @@ jsonpath "$.events[?(@.type=='agent_start')]" exists
 ```
 
 `exists` works on any non-null value, regardless of whether it's an object or a list. Use `count` only on expressions guaranteed to return collections (e.g., `jsonpath "$.events"` which is always an array).
+
+---
+
+## 2026-05-25 — Paperclip has no native artifact or file storage
+
+### What happened
+
+Investigated whether Paperclip exposes any file/artifact/document storage API for inter-agent data sharing.
+
+### Finding
+
+Paperclip has no file storage API. The API covers auth, health, companies, agents, and org-tree only. All inter-agent communication is text-in-prompt — Paperclip composes the wake payload server-side, embedding prior agent outputs as text in the `prompt` or `renderedPrompt` field. Agents never talk to each other directly and do not share a filesystem. Each agent container has an isolated workspace volume.
+
+The `"storage": { "provider": "local_disk" }` in paperclip-config.json is Paperclip's internal storage config (database, logs, secrets), not a user-facing file API.
+
+### Solution
+
+Added a shared Docker volume (`shared-artifacts`) mounted at `/artifacts` in all agent containers. Agents write files there and pass path references in their text output. The consuming agent reads from the path received in its wake payload.
+
+This is the eval-stage solution. ROADMAP.md describes the next step: MinIO (S3-compatible) for HTTP access, bucket policies, and presigned URLs.
+
+### Key details
+
+- Volume: `shared-artifacts:/artifacts` in docker-compose.yml
+- Convention: write to `/artifacts/{context}/{filename}`, return path as reference
+- Agents pass references, not file content — better for security and token efficiency
+
+---
+
+## 2026-05-25 — Pi web search via custom extensions (Exa API)
+
+### What happened
+
+Pi has no built-in web search tool. Its built-in tools are filesystem/coding only: read, bash, edit, write, grep, find, ls. Tested whether agents could do web research.
+
+### Finding
+
+Pi supports custom tool registration via extensions (TypeScript files loaded with `-e` flag). Created two extensions:
+
+- `web-search.ts` — registers `web_search` tool backed by Exa API (`POST https://api.exa.ai/search` with `x-api-key` header). Returns titles, URLs, highlights, and text content.
+- `web-fetch.ts` — registers `web_fetch` tool for fetching individual URLs. Tries direct HTTP fetch first, falls back to Jina Reader (`https://r.jina.ai/`) for JS-rendered pages.
+
+### Provider tool-calling compatibility
+
+Not all providers handle tool calling reliably:
+
+- **DeepSeek (deepseek-chat / deepseek-v4-flash)**: works correctly. Generated valid tool calls, processed results, produced structured summaries.
+- **Groq (llama-3.3-70b-versatile)**: flaky. First attempt generated a valid tool call but subsequent attempts failed with "Failed to call a function. Please adjust your prompt." Error comes from Groq's API, not Pi.
+- **NVIDIA (llama-4-maverick)**: untested for tool calling (401 auth issue in test, unrelated to tools).
+
+### Extension gotchas
+
+- Exa's `score` field can be undefined — guard with null check before `.toFixed()`
+- Keep tool parameter schemas simple (no `Type.Optional`, no `Type.Union`) for maximum provider compatibility — Groq rejects complex schemas
+- `--no-extensions` only disables auto-discovery; explicit `-e` paths still load
+- `--no-tools` disables ALL tools including extension-registered ones — don't use it when testing extensions
+- Extensions need `typebox` for parameter schemas — Pi bundles it at `node_modules/typebox`
+
+### References
+
+- `src/agents/extensions/web-search.ts` — Exa search extension
+- `src/agents/extensions/web-fetch.ts` — URL fetch extension
+- Reference implementation: github.com/amosblomqvist/pi-config/blob/main/extensions/web-fetch/index.ts
+- Exa API: `POST https://api.exa.ai/search` with `x-api-key` header
+- Jina Reader: `GET https://r.jina.ai/{url}` with `Accept: text/markdown`
+
+---
+
+## 2026-05-25 — PowerShell cannot capture Pi's stdout in non-interactive mode
+
+### What happened
+
+Multiple attempts to run Pi with `-p` (print mode) via PowerShell produced empty output files. Exit code 255 from background tasks, empty stdout/stderr captures.
+
+### Root cause
+
+Pi writes its output (JSON mode, RPC mode) to stdout using Node.js streams that PowerShell's `Start-Process -RedirectStandardOutput` and `*>` redirection cannot reliably capture. The issue is specific to PowerShell 5.1's handling of Node.js process output — likely related to encoding or stream buffering differences.
+
+### Solution
+
+Use bash (WSL) for Pi CLI testing. Output captures correctly with standard shell redirection and piping:
+
+```bash
+pi --mode json --no-session ... -p "prompt" 2>&1 | grep -E '"type":"tool_execution_end"'
+```
+
+### Key details
+
+- PowerShell `*> file` produces empty files even though Pi runs and exits
+- `Start-Process -RedirectStandardOutput` also fails
+- `cmd /c "pi ... 2>&1"` from PowerShell also produces empty output
+- Bash captures everything correctly — use it for all Pi CLI testing
