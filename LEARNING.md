@@ -210,3 +210,87 @@ Send prompt to stdin immediately after spawn. Wait for `agent_start` as confirma
 
 - `src/agents/bridge.mjs` — protocol implementation
 - `docs/pi-rpc-protocol.md` — full protocol documentation
+
+---
+
+## 2026-05-25 — PowerShell `$ErrorActionPreference = "Stop"` breaks native command stderr capture
+
+### What happened
+
+The test runner (`tests/run-all.ps1`) crashed on the first hurl invocation despite hurl reporting "Success". The script exited with code 1 and no further tests ran.
+
+### Root cause
+
+The script set `$ErrorActionPreference = "Stop"` globally (line 6) and used `$output = & hurl --test $hurlFile 2>&1` to capture output. In PowerShell 5.1, `2>&1` wraps each stderr line as a `System.Management.Automation.ErrorRecord` (specifically `NativeCommandError`). With `$ErrorActionPreference = "Stop"`, the first ErrorRecord becomes a terminating error, killing the script.
+
+hurl writes its progress and summary to stderr by design (e.g., `Success ... (7 request(s) in 11617 ms)`). The same applies to k6, which writes its dashboard to stderr.
+
+### Solution
+
+Toggle `$ErrorActionPreference` to `"Continue"` around any native command invocation that uses `2>&1`:
+
+```powershell
+$savedEAP = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$output = & hurl --test $hurlFile 2>&1
+$exitCode = $LASTEXITCODE
+$ErrorActionPreference = $savedEAP
+```
+
+`$LASTEXITCODE` still correctly reflects the native command's exit code regardless of `$ErrorActionPreference`.
+
+### Key details
+
+- Affects PowerShell 5.1 (Windows PowerShell). PowerShell 7+ behaves differently with native commands.
+- The `| Out-Null` pipeline does not prevent the error — the ErrorRecord is created before reaching the pipeline.
+- Alternative: use `cmd /c "hurl --test file 2>&1"` to keep stderr as plain text, but this loses structured error info.
+
+---
+
+## 2026-05-25 — Hurl `file,` body paths resolve relative to `--file-root`, not CWD
+
+### What happened
+
+Tier 2 contract tests failed with `file tests/fixtures/wake-payload.json can not be read` despite the file existing at the expected repo-root-relative path.
+
+### Root cause
+
+Hurl resolves `file,<path>` body references relative to its file root, which defaults to the hurl file's directory — not the caller's working directory. The hurl file at `tests/hurl/tier2-contracts.hurl` referenced `tests/fixtures/wake-payload.json`, so hurl looked for `tests/hurl/tests/fixtures/wake-payload.json`.
+
+### Solution
+
+Pass `--file-root $RepoRoot` to hurl invocations so file paths resolve relative to the repository root:
+
+```powershell
+& hurl --test --file-root $script:RepoRoot $hurlFile
+```
+
+### Alternative
+
+Change the file paths in the hurl files to be relative to the hurl file's directory (e.g., `../fixtures/wake-payload.json`). The `--file-root` approach is preferred because it keeps paths consistent with the repo layout.
+
+---
+
+## 2026-05-25 — Hurl JSONPath filter `count` fails on single-match results
+
+### What happened
+
+Test 2.7 (protocol events structure) failed with `invalid filter input type — actual: object, expected: list, bytes or nodeset` on assertions like:
+
+```
+jsonpath "$.events[?(@.type=='agent_start')]" count >= 1
+```
+
+### Root cause
+
+When a JSONPath filter expression matches exactly one element, hurl's JSONPath implementation returns a single object rather than a one-element list. The `count` predicate requires a collection type (list, bytes, or nodeset) and rejects a bare object.
+
+### Solution
+
+Use `exists` instead of `count >= 1` for assertions that just need to confirm at least one match:
+
+```
+jsonpath "$.events[?(@.type=='agent_start')]" exists
+```
+
+`exists` works on any non-null value, regardless of whether it's an object or a list. Use `count` only on expressions guaranteed to return collections (e.g., `jsonpath "$.events"` which is always an array).

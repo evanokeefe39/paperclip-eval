@@ -180,13 +180,14 @@ function Run-Tier1 {
     }
 
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
-    $output = & hurl --test $hurlFile 2>&1
+    $savedEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $output = & hurl --test --file-root $script:RepoRoot $hurlFile 2>&1
     $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $savedEAP
     $timer.Stop()
 
     if ($exitCode -eq 0) {
-        # Parse individual test results from hurl output if possible,
-        # otherwise report the suite as a single pass.
         $testNames = @(
             @{ Id = "1.1"; Name = "Container health" },
             @{ Id = "1.2"; Name = "Bridge responds" },
@@ -223,8 +224,11 @@ function Run-Tier2 {
         Write-TestResult -TestId "2.x" -Name "Tier 2 hurl suite" -Status "SKIP" -DurationSec 0
     } else {
         $timer = [System.Diagnostics.Stopwatch]::StartNew()
-        $output = & hurl --test $hurlFile 2>&1
+        $savedEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        $output = & hurl --test --file-root $script:RepoRoot $hurlFile 2>&1
         $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $savedEAP
         $timer.Stop()
 
         if ($exitCode -eq 0) {
@@ -342,8 +346,11 @@ function Run-Tier3 {
     # --- Test 3.1: k6 load test ---
     $loadTestFile = Join-Path $script:RepoRoot "tests\k6\load-test.js"
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    $savedEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & k6 run $loadTestFile 2>&1 | Out-Null
     $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $savedEAP
     $timer.Stop()
 
     if ($exitCode -eq 0) {
@@ -356,8 +363,11 @@ function Run-Tier3 {
     # --- Test 3.1b: k6 timeout test ---
     $timeoutTestFile = Join-Path $script:RepoRoot "tests\k6\timeout-test.js"
     $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    $savedEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & k6 run $timeoutTestFile 2>&1 | Out-Null
     $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $savedEAP
     $timer.Stop()
 
     if ($exitCode -eq 0) {
@@ -479,7 +489,10 @@ function Run-Tier3 {
         Write-TestResult -TestId "3.4" -Name "Memory stability (<100MB growth)" -Status "SKIP" -DurationSec 0
     } else {
         # Run k6 load test
+        $savedEAP = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
         & k6 run $loadTestFile 2>&1 | Out-Null
+        $ErrorActionPreference = $savedEAP
 
         Start-Sleep -Seconds 2
         $memAfter = Get-ContainerMemoryMB -ContainerName $ceoContainer

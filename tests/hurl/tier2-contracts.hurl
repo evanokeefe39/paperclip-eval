@@ -55,6 +55,6 @@ Content-Type: application/json
 HTTP 200
 [Asserts]
 jsonpath "$.events" count >= 3
-jsonpath "$.events[?(@.type=='agent_start')]" count >= 1
-jsonpath "$.events[?(@.type=='agent_end')]" count >= 1
-jsonpath "$.events[?(@.type=='message_update')]" count >= 1
+jsonpath "$.events[?(@.type=='agent_start')]" exists
+jsonpath "$.events[?(@.type=='agent_end')]" exists
+jsonpath "$.events[?(@.type=='message_update')]" exists

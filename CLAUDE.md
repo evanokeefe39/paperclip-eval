@@ -29,6 +29,7 @@ auth.json                    Master auth file — copy into agent .pi/agent/ dir
 scripts/backup.sh            Backup Paperclip instance (bash/WSL)
 scripts/wipe.sh              Wipe and reset Paperclip instance (bash/WSL)
 tests/                       Hurl, k6, and fixture-based test suite
+tests/results/               Timestamped test run reports
 .claude/skills/paperclip-api.md  API reference skill
 LEARNING.md                  Running log of issues and workarounds
 ```
