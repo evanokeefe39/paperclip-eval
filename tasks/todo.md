@@ -58,9 +58,12 @@ tests/
 
 ## Status
 - [x] Plan written
-- [ ] helpers.sh
-- [ ] e2e-1-registration.sh
-- [ ] e2e-2-invocation.sh
-- [ ] e2e-3-cross-agent.sh
-- [ ] e2e-4-charlimit.sh
-- [ ] run-e2e.sh
+- [x] helpers.sh
+- [x] e2e-1-registration.sh
+- [x] e2e-2-invocation.sh
+- [x] e2e-3-cross-agent.sh
+- [x] e2e-4-charlimit.sh
+- [x] run-e2e.sh
+- [ ] Playwright MCP configured (restart Claude Code to activate)
+- [ ] Run tests against live stack
+- [ ] Add Playwright browser-level tests for UI verification
