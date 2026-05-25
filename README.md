@@ -32,7 +32,7 @@ Each agent gets its own container from the same image. The bridge translates HTT
 - Docker and Docker Compose
 - Node.js 20+
 - Git
-- A working LLM API key (Anthropic, OpenRouter, DeepSeek, etc.)
+- A working LLM API key (OpenRouter, DeepSeek, etc.)
 
 ## Quick start
 
@@ -47,13 +47,13 @@ Starts the server at http://localhost:3100 with embedded PostgreSQL.
 ### 2. Install Pi
 
 ```powershell
-npm install -g @anthropic/pi
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 ```
 
 Verify standalone:
 
 ```powershell
-pi --mode rpc --no-session --provider anthropic --model claude-sonnet-4-20250514
+pi --mode rpc --no-session --provider openrouter --model deepseek/deepseek-chat-v3-0324:free
 ```
 
 Type `{"type":"prompt","message":"Say hello"}` and press Enter. You should see JSONL events ending with `agent_end`. Ctrl+C to exit.

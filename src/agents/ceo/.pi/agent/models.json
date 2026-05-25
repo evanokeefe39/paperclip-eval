@@ -1,0 +1,10 @@
+{
+  "agentic": {
+    "provider": "minimax",
+    "model": "minimax-m2.7"
+  },
+  "default": {
+    "provider": "nvidia",
+    "model": "meta/llama-4-maverick-17b-128e-instruct"
+  }
+}

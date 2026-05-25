@@ -7,23 +7,39 @@ Evaluation repo for running Paperclip agent orchestration with Pi agents via Doc
 ## Repo layout
 
 ```
-pi-bridge/bridge.mjs        HTTP-to-RPC bridge shim (Node, ~80 lines)
-pi-bridge/Dockerfile         Container image — node:20-slim + Pi CLI
-pi-bridge/docker-compose.yml Per-agent container config (ports, providers, API keys)
+src/agents/
+  bridge.mjs               HTTP-to-RPC bridge shim (Node, zero deps)
+  Dockerfile               Shared image — node:22-slim + Pi CLI
+  docker-compose.yml        Full stack: Paperclip + agent containers
+  setup.ps1                 One-shot setup: bootstrap, create company, register agents
+  bootstrap-invite.cjs      DB-level bootstrap invite creator (bypasses CLI)
+  paperclip-config.json     Config template for Paperclip CLI compatibility
+  .env.example              Template for provider API keys
+  ceo/                      CEO agent config and prompt
+    .pi/agent/config.yml
+    .pi/agent/models.json
+    AGENTS.md
+  researcher/               Researcher agent config and prompt
+    .pi/agent/config.yml
+    .pi/agent/models.json
+    AGENTS.md
 scripts/backup.sh            Backup Paperclip instance (bash/WSL)
 scripts/wipe.sh              Wipe and reset Paperclip instance (bash/WSL)
+tests/                       Hurl, k6, and fixture-based test suite
+.claude/skills/paperclip-api.md  API reference skill
 LEARNING.md                  Running log of issues and workarounds
-README.md                    Setup guide
 ```
 
 ## Key context
 
-- Paperclip runs on host at http://localhost:3100 (embedded PostgreSQL)
-- Bridge containers expose per-agent HTTP endpoints (8081, 8082, etc.)
-- Paperclip talks to agents via its HTTP adapter, not pi_local
+- Everything runs in Docker via docker-compose (Paperclip + agent bridges)
+- Paperclip image: ghcr.io/paperclipai/paperclip:latest (authenticated mode)
+- Paperclip UI at http://localhost:3100, agents at :8081, :8082
+- On Docker network: Paperclip reaches agents at http://ceo:8080, http://researcher:8080
+- Agents registered via HTTP adapter, not pi_local (bypasses CLI arg length limit)
 - Pi runs in RPC mode inside containers — JSONL over stdin/stdout
 - bridge.mjs translates between HTTP POST and Pi's JSONL protocol
-- The HTTP adapter is not in Paperclip's UI wizard — agents created via API only
+- First-time setup: run setup.ps1. Subsequent starts: docker compose up -d
 
 ## Platform
 

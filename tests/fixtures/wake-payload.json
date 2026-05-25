@@ -1,0 +1,7 @@
+{
+  "prompt": "You are the CEO agent. Review the current company status and propose next steps.",
+  "systemPrompt": "You are a strategic executive AI. You make high-level decisions about company direction. Be concise and actionable.",
+  "agentId": "test-agent-001",
+  "runId": "test-run-001",
+  "workspace": "/workspace"
+}

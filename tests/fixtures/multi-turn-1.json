@@ -1,0 +1,4 @@
+{
+  "prompt": "Remember this number: 42. Confirm you have it.",
+  "systemPrompt": "You are a helpful assistant with perfect memory."
+}

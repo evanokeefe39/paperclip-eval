@@ -1,0 +1,61 @@
+x-agent: &agent
+  build:
+    context: .
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  env_file: .env
+  deploy:
+    resources:
+      limits:
+        memory: 512M
+
+services:
+  paperclip:
+    image: ghcr.io/paperclipai/paperclip:latest
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    environment:
+      HOST: "0.0.0.0"
+      PAPERCLIP_HOME: "/paperclip"
+      PAPERCLIP_PUBLIC_URL: "http://localhost:3100"
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-paperclip-eval-secret-change-me}"
+      PAPERCLIP_DEPLOYMENT_MODE: "authenticated"
+      PAPERCLIP_DEPLOYMENT_EXPOSURE: "private"
+    volumes:
+      - paperclip-data:/paperclip
+
+  ceo:
+    <<: *agent
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        AGENT_NAME: ceo
+    ports:
+      - "8081:8080"
+    volumes:
+      - ceo-workspace:/workspace
+    depends_on:
+      paperclip:
+        condition: service_started
+
+  researcher:
+    <<: *agent
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        AGENT_NAME: researcher
+    ports:
+      - "8082:8080"
+    volumes:
+      - researcher-workspace:/workspace
+    depends_on:
+      paperclip:
+        condition: service_started
+
+volumes:
+  paperclip-data:
+  ceo-workspace:
+  researcher-workspace:
