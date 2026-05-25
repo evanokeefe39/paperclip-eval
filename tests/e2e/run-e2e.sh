@@ -19,13 +19,13 @@ TESTS_TO_RUN=()
 for arg in "$@"; do
     case "$arg" in
         --fail-fast) FAIL_FAST=true ;;
-        [1-7]) TESTS_TO_RUN+=("$arg") ;;
+        [1-8]) TESTS_TO_RUN+=("$arg") ;;
         *) echo "Unknown argument: $arg"; exit 1 ;;
     esac
 done
 
 if [ ${#TESTS_TO_RUN[@]} -eq 0 ]; then
-    TESTS_TO_RUN=(1 2 3 4 5 6 7)
+    TESTS_TO_RUN=(1 2 3 4 5 6 7 8)
 fi
 
 # --- Prerequisite check ---

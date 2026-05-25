@@ -120,6 +120,7 @@ const server = http.createServer(async (req, res) => {
     "--model", PI_MODEL,
     "-e", "/app/extensions/web-search.ts",
     "-e", "/app/extensions/web-fetch.ts",
+    "-e", "/app/extensions/escalate.ts",
     ...(systemPrompt ? ["--append-system-prompt", systemPrompt] : []),
   ];
 

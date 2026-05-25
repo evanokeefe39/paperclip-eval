@@ -434,3 +434,55 @@ pi --mode json --no-session ... -p "prompt" 2>&1 | grep -E '"type":"tool_executi
 - `Start-Process -RedirectStandardOutput` also fails
 - `cmd /c "pi ... 2>&1"` from PowerShell also produces empty output
 - Bash captures everything correctly — use it for all Pi CLI testing
+
+---
+
+## 2026-05-26 — Paperclip hostname validation blocks container-to-container auth
+
+### What happened
+
+The escalate extension running inside an agent container tried to authenticate with Paperclip at `http://paperclip:3100` (the Docker service name). Paperclip returned 403: "Hostname 'paperclip' is not allowed for this Paperclip instance."
+
+### Root cause
+
+Paperclip validates incoming request hostnames against its public URL. When `PAPERCLIP_PUBLIC_URL=http://localhost:3100`, requests arriving via the Docker network hostname `paperclip` are rejected. The validation is in the server itself, not a reverse proxy — `Host` header overrides do not bypass it.
+
+### What did not work
+
+1. Config file `server.allowedHostnames` array — Paperclip ignores this field
+2. `paperclipai allowed-hostname paperclip` CLI — requires `local_trusted` mode (incompatible with Docker)
+3. Overriding the `Host` header in fetch — server checks actual hostname, not the header
+
+### Solution
+
+Set `PAPERCLIP_PUBLIC_URL=http://paperclip:3100` in docker-compose.yml for the Paperclip service. This makes Paperclip accept the Docker network hostname. The host browser can still reach `http://localhost:3100` — Paperclip accepts both the public URL hostname and localhost.
+
+### Key details
+
+- `PAPERCLIP_PUBLIC_URL` controls which hostnames are accepted for API requests
+- Setting it to the Docker hostname does not break localhost access from the host
+- Agent containers use `http://paperclip:3100` for all API calls (auth, issues, pause/resume)
+- Session cookie auth is the only auth mechanism — no API keys or bearer tokens exist
+
+---
+
+## 2026-05-26 — Paperclip issue API: labels are IDs, not strings
+
+### What happened
+
+Creating an issue with `labels: ["escalation"]` returned 201 but the labels array was empty. The field was silently ignored.
+
+### Root cause
+
+Paperclip labels are a separate resource. The issue creation endpoint accepts `labelIds` (array of UUIDs), not `labels` (array of strings). Labels must be created first via `POST /api/companies/{cid}/labels` with `name` and `color` fields, then referenced by ID.
+
+### API surface for issues
+
+- `POST /api/companies/{cid}/labels` — create label (returns `{id, name, color}`)
+- `GET /api/companies/{cid}/labels` — list labels
+- `POST /api/companies/{cid}/issues` — create issue (fields: `title`, `description`, `priority`, `labelIds`)
+- `GET /api/companies/{cid}/issues` — list issues
+- Body field is `description`, not `body`
+- `priority` accepts: `low`, `medium`, `high`, `urgent`
+- `createdByAgentId` is accepted but ignored when using session auth (always set to null)
+- No DELETE endpoint for issues

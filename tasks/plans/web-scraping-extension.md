@@ -2,314 +2,492 @@
 
 ## Intent
 
-Dual-mode web scraping extension for Data/Analyst agent. Mode 1: Apify actor-based scraping for structured sites (social media, e-commerce, search engines). Mode 2: Custom scraping for sites without Apify actors or needing bespoke extraction. Gives Data agent the ability to gather structured data at scale from any web source.
+Multi-tier web scraping extension for Data/Analyst agent. All scraping backends available simultaneously — agent picks based on target characteristics or auto-escalates on failure. Gives Data agent the ability to gather structured data at scale from any web source, with residential proxy escalation path via Apify Cloud ($39/mo budget).
 
 ## Architecture
 
-Two scraping backends, unified tool interface:
+Four scraping tiers via ephemeral Docker containers + Apify Cloud API, orchestrated by a scraping gateway:
 
 ```
-┌─────────────────────────────────────────────┐
-│  Data Agent (Pi + bridge.mjs)               │
-│                                             │
-│  Tools:                                     │
-│    scrape_structured  → Apify REST API      │
-│    scrape_custom      → Crawlee (local)     │
-│    list_scrapers      → Apify Store search  │
-│    scrape_status      → Poll running jobs   │
-└─────────────────────────────────────────────┘
+Data Agent (Pi + bridge.mjs)
+    │ HTTP
+    ▼
+Scrape Gateway (docker.sock access, always-on sidecar in compose)
+    │
+    ├── docker run --rm  apify/actor-node-cheerio:22              [Tier 1: fast HTML]
+    ├── docker run --rm  pyd4vinci/scrapling:latest               [Tier 2: anti-detection]
+    ├── docker run --rm  apify/actor-node-playwright-chrome:22    [Tier 3: JS/SPA]
+    └── Apify Cloud REST API                                      [Tier 4: residential proxies]
+         $39/mo budget
 ```
 
-### Scrapling → Crawlee substitution
+### Tier selection
 
-Scrapling is Python-only. Our extensions are TypeScript running in a Node container. Options considered:
+| Tier | Image / Service | Strength | Use when |
+|------|----------------|----------|----------|
+| 1 — Cheerio | `apify/actor-node-cheerio:22` | Fast, lightweight, bulk | Static HTML, no anti-bot |
+| 2 — Scrapling | `pyd4vinci/scrapling:latest` | TLS fingerprinting, header rotation, anti-detection without browser | 403s from Tier 1, basic bot detection |
+| 3 — Playwright | `apify/actor-node-playwright-chrome:22` | Full browser, JS execution | SPAs, dynamic content, JS-required |
+| 4 — Apify Cloud | REST API (remote) | Residential proxies, maintained actors, heavy anti-bot | Cloudflare Enterprise, IP blocks, platforms with existing actors (LinkedIn, Amazon, Google Maps) |
 
-| Option | Pros | Cons |
-|--------|------|------|
-| Scrapling via Python subprocess | Exact match to user spec | Extra runtime (Python) in container, IPC complexity, error handling across process boundary |
-| Crawlee (TypeScript) | Native TS, zero IPC, same ecosystem as Apify, anti-detection built-in | Different library name than requested |
-| Playwright raw | Already available via MCP | No anti-detection, no session management, no proxy rotation |
+### Cost model
 
-**Recommendation: Crawlee.** It's Apify's open-source scraping framework in TypeScript/Node. Has anti-detection (browser fingerprinting, session rotation, proxy management), handles pagination, works headless in Docker. Architecturally consistent with Mode 1 (same company, same patterns). If Scrapling is a hard requirement, we add Python to the container image and shell out — but that's significant complexity for eval stage.
+- Tiers 1-3: free (local compute, ephemeral containers, ~seconds per run)
+- Tier 4: $39/month Apify credit. Residential proxies, managed infrastructure. Reserve for when local methods fail.
+- Agent should prefer lowest sufficient tier. Auto-escalation on failure optional.
 
-**Decision needed:** Crawlee (recommended) or Scrapling via subprocess?
+### Ephemeral container pattern
+
+No scraping images run persistently. Gateway spins them up per-request:
+
+1. Data agent calls gateway: `POST /scrape { tier, params }`
+2. Gateway does: `docker run --rm --network=none --memory=2g --stop-timeout=60 {image} {entrypoint} '{params_json}'`
+3. Container scrapes, writes results to stdout (JSON)
+4. Gateway collects stdout, returns to data agent
+5. Container auto-removed
+
+Benefits: no idle resource usage, clean state per scrape, no cross-contamination between targets.
+
+### Pre-pull strategy
+
+Images pulled during `setup.sh` so first scrape doesn't block:
+
+```bash
+docker pull apify/actor-node-cheerio:22
+docker pull pyd4vinci/scrapling:latest
+docker pull apify/actor-node-playwright-chrome:22
+```
 
 ## Implementation Plan
 
-### Phase 1: Apify integration (scrape_structured, list_scrapers)
+### Phase 1: Scrape Gateway service
 
 #### 1.1 — File structure
 
 ```
-src/agents/extensions/
-  web-scraping.ts           Main extension file — registers all scraping tools
-  web-scraping/
-    apify.ts                Apify REST API client (zero deps, raw fetch)
-    crawlee.ts              Local Crawlee scraping engine
-    types.ts                Shared interfaces
-    config.ts               API keys, timeouts, defaults
+src/agents/scrape-gateway/
+  server.mjs              HTTP server (Node, zero deps like bridge.mjs)
+  entrypoints/
+    cheerio.mjs           Entrypoint script for Cheerio container
+    scrapling.py          Entrypoint script for Scrapling container
+    playwright.mjs        Entrypoint script for Playwright container
+  Dockerfile              Gateway image (node:22-slim + docker CLI)
 ```
 
-#### 1.2 — Apify REST API client
+#### 1.2 — Gateway server
 
-No SDK — raw `fetch` calls to Apify API v2. Endpoints needed:
+Thin HTTP server. Responsibilities:
+- Accept scrape requests from data agent
+- Validate params (allowlisted images only — no arbitrary docker run)
+- Spawn ephemeral container with appropriate image
+- Collect results (stdout JSON or artifact file)
+- Enforce timeout (kill container if exceeded)
+- Return results to caller
 
 ```typescript
-// Actor discovery
-GET /v2/store?search={query}&limit=10
-// → Returns actor list with name, description, stats (runs, rating)
+// POST /scrape
+interface ScrapeRequest {
+  tier: "cheerio" | "scrapling" | "playwright" | "apify";
+  params: {
+    url: string;
+    selector?: string;
+    extract_fields?: Record<string, string>;
+    pagination?: { next_selector: string; max_pages: number };
+    wait_for?: string;       // Tier 3 only
+    actor_id?: string;       // Tier 4 only
+    actor_input?: object;    // Tier 4 only
+  };
+  timeout?: number;          // seconds, default 60, max 120
+  max_results?: number;      // cap items returned, default 100
+}
 
-// Actor detail + input schema
-GET /v2/acts/{actorId}
-// → Returns README, input schema (JSON Schema), pricing
+// POST /scrape/status
+interface StatusRequest {
+  job_id: string;  // For Tier 4 async runs
+}
 
-// Run actor
-POST /v2/acts/{actorId}/runs?waitForFinish={seconds}
-// Body: actor input (per input schema)
-// → Returns run object with id, status, datasetId
-
-// Get run status
-GET /v2/actor-runs/{runId}
-// → Returns status, datasetId, usage
-
-// Get dataset items
-GET /v2/datasets/{datasetId}/items?limit={n}&offset={o}&format=json
-// → Returns scraped data array
-```
-
-**Auth:** `APIFY_API_TOKEN` env var. Bearer token in Authorization header.
-
-#### 1.3 — list_scrapers tool
-
-**Input:** `{ query: string, category?: string }`
-**Output:** Top 5 matching actors with: name, description, monthly runs, input schema summary
-
-Implementation:
-1. Search Apify Store via API
-2. Sort by monthly runs (popularity proxy)
-3. Return concise list for LLM to select from
-
-#### 1.4 — scrape_structured tool
-
-**Input:**
-```typescript
-{
-  actor_id: string;        // e.g. "apify/web-scraper" or actor ID from list_scrapers
-  input: object;           // Actor-specific input (per input schema)
-  wait_seconds?: number;   // Max wait for results (default 45, cap at 60)
-  max_results?: number;    // Cap dataset items returned (default 50)
+// POST /list-actors
+interface ListActorsRequest {
+  query: string;
+  category?: string;
 }
 ```
 
-**Output:** Scraped data array (JSON) + metadata (run ID, items count, cost estimate)
+#### 1.3 — Security constraints on gateway
 
-Implementation:
-1. Validate actor_id exists (HEAD check or cached from list_scrapers)
-2. POST run with input + waitForFinish
-3. If run completes within wait: fetch dataset items (paginated if needed)
-4. If run still running: return run ID for polling via scrape_status
-5. Cap results at max_results to prevent context overflow
+- **Image allowlist:** Only the three pre-approved images + Apify API. No arbitrary image execution.
+- **Network isolation:** Ephemeral containers run with `--network=none` (no internet from inside container — gateway fetches URL first and passes content? No, containers need network for scraping). Correction: containers get outbound internet but no access to Docker internal network (custom network with no inter-container routing).
+- **Resource limits:** `--memory=2g --cpus=2 --stop-timeout={timeout}`
+- **No volume mounts to host:** Results via stdout only. No docker.sock passthrough to scraping containers.
+- **Rate limiting:** Gateway enforces max 5 concurrent containers, queue excess.
 
-#### 1.5 — scrape_status tool
+#### 1.4 — docker-compose integration
 
-**Input:** `{ run_id: string }`
-**Output:** Run status + results if complete
-
-For long-running scrapes. LLM calls this to poll.
-
-### Phase 2: Custom scraping (scrape_custom)
-
-#### 2.1 — Crawlee integration
-
-Crawlee runs inside the container. Requires adding it as a dependency (first npm dep in the project — flag in assumption log).
-
-**Container changes:**
-- Add `crawlee` and `playwright` to package.json
-- Install Chromium in Dockerfile (playwright install chromium)
-- This adds ~400MB to image size (Chromium binary)
-
-**Alternative (lighter):** Use `cheerio-crawler` from Crawlee (no browser, HTML parsing only). Add `playwright-crawler` only if JS-rendered pages needed. Start with Cheerio, escalate to Playwright per-request.
-
-#### 2.2 — scrape_custom tool
-
-**Input:**
-```typescript
-{
-  url: string;                    // Target URL or start URL
-  selector: string;              // CSS selector for target data
-  pagination?: {
-    next_selector?: string;      // CSS selector for "next" button/link
-    max_pages?: number;          // Page limit (default 5)
-  };
-  extract_fields?: {             // Named fields to extract per item
-    [field_name: string]: string; // field_name → CSS selector
-  };
-  wait_for?: string;             // CSS selector to wait for before extraction (JS-rendered)
-  use_browser?: boolean;         // Force Playwright (default: try Cheerio first)
-  max_items?: number;            // Cap results (default 100)
-}
+```yaml
+services:
+  scrape-gateway:
+    build: ./src/agents/scrape-gateway
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - shared-artifacts:/artifacts
+    networks:
+      - internal
+    environment:
+      - APIFY_API_TOKEN=${APIFY_API_TOKEN}
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 ```
 
-**Output:** Extracted items array + metadata (pages crawled, items found, errors)
+### Phase 2: Tier 1 — Cheerio (fast HTML)
 
-Implementation:
-1. If `use_browser` or `wait_for` specified: use PlaywrightCrawler
-2. Otherwise: try CheerioCrawler first (fast, light)
-3. Navigate to URL, apply selector
-4. If `extract_fields`: for each matched element, extract sub-selectors
-5. If `pagination`: follow next_selector up to max_pages
-6. Deduplicate results
-7. Return structured JSON array
+#### 2.1 — Entrypoint script (cheerio.mjs)
 
-#### 2.3 — Anti-detection
+Runs inside `apify/actor-node-cheerio:22`. Receives params as CLI arg (JSON string).
 
-Crawlee provides:
-- Session rotation (cookie persistence per session)
-- User-Agent rotation
-- Request fingerprinting mitigation
-- Automatic retry with backoff on blocks (HTTP 403/429)
-- Proxy support (configure via `PROXY_URLS` env var, optional)
+```javascript
+// cheerio.mjs — stdin JSON → scrape → stdout JSON
+import { CheerioCrawler } from 'crawlee';
 
-Configure in crawlee.ts:
-```typescript
+const params = JSON.parse(process.argv[2] || await readStdin());
+
+const results = [];
+const crawler = new CheerioCrawler({
+  maxRequestsPerCrawl: params.pagination?.max_pages || 1,
+  requestHandler: async ({ $, request }) => {
+    // Extract items via selector
+    $(params.selector).each((i, el) => {
+      if (params.extract_fields) {
+        const item = {};
+        for (const [field, sel] of Object.entries(params.extract_fields)) {
+          item[field] = $(el).find(sel).text().trim();
+        }
+        results.push(item);
+      } else {
+        results.push({ text: $(el).text().trim(), html: $(el).html() });
+      }
+    });
+    // Pagination
+    if (params.pagination?.next_selector) {
+      const next = $(params.pagination.next_selector).attr('href');
+      if (next) await crawler.addRequests([{ url: new URL(next, request.url).href }]);
+    }
+  },
+});
+
+await crawler.run([params.url]);
+console.log(JSON.stringify({ items: results, pages_crawled: crawler.stats.requestsFinished }));
+```
+
+#### 2.2 — Gateway spawns it
+
+```bash
+docker run --rm --memory=2g --cpus=2 --network=scrape-net \
+  apify/actor-node-cheerio:22 \
+  node /app/cheerio.mjs '{"url":"...","selector":"..."}'
+```
+
+Entrypoint script bind-mounted or built into a thin wrapper image extending the base.
+
+### Phase 3: Tier 2 — Scrapling (anti-detection)
+
+#### 3.1 — Entrypoint script (scrapling.py)
+
+Runs inside `pyd4vinci/scrapling:latest`. Python entrypoint.
+
+```python
+# scrapling.py — stdin JSON → scrape → stdout JSON
+import sys, json
+from scrapling import Fetcher, StealthFetcher
+
+params = json.loads(sys.argv[1] if len(sys.argv) > 1 else sys.stdin.read())
+
+# Use StealthFetcher for anti-detection (smart TLS, header rotation)
+fetcher = StealthFetcher()
+page = fetcher.get(params["url"])
+
+results = []
+elements = page.css(params.get("selector", "body"))
+for el in elements:
+    if params.get("extract_fields"):
+        item = {}
+        for field, sel in params["extract_fields"].items():
+            found = el.css(sel)
+            item[field] = found[0].text if found else ""
+        results.append(item)
+    else:
+        results.append({"text": el.text, "html": str(el)})
+
+# Pagination
+pages_crawled = 1
+if params.get("pagination"):
+    max_pages = params["pagination"].get("max_pages", 5)
+    for _ in range(max_pages - 1):
+        next_el = page.css(params["pagination"]["next_selector"])
+        if not next_el:
+            break
+        next_url = next_el[0].attrib.get("href")
+        if not next_url:
+            break
+        page = fetcher.get(next_url)
+        for el in page.css(params.get("selector", "body")):
+            if params.get("extract_fields"):
+                item = {}
+                for field, sel in params["extract_fields"].items():
+                    found = el.css(sel)
+                    item[field] = found[0].text if found else ""
+                results.append(item)
+            else:
+                results.append({"text": el.text})
+        pages_crawled += 1
+
+print(json.dumps({"items": results, "pages_crawled": pages_crawled}))
+```
+
+#### 3.2 — Gateway spawns it
+
+```bash
+docker run --rm --memory=2g --cpus=2 --network=scrape-net \
+  pyd4vinci/scrapling:latest \
+  python /app/scrapling.py '{"url":"...","selector":"..."}'
+```
+
+Entrypoint mounted via `-v ./entrypoints/scrapling.py:/app/scrapling.py:ro`
+
+### Phase 4: Tier 3 — Playwright (full browser)
+
+#### 4.1 — Entrypoint script (playwright.mjs)
+
+Runs inside `apify/actor-node-playwright-chrome:22`.
+
+```javascript
+// playwright.mjs
+import { PlaywrightCrawler } from 'crawlee';
+
+const params = JSON.parse(process.argv[2] || await readStdin());
+const results = [];
+
 const crawler = new PlaywrightCrawler({
-  sessionPoolOptions: { maxPoolSize: 10 },
-  maxRequestRetries: 3,
-  requestHandlerTimeoutSecs: 30,
+  maxRequestsPerCrawl: params.pagination?.max_pages || 1,
   headless: true,
-  launchContext: {
-    launchOptions: { args: ['--no-sandbox', '--disable-setuid-sandbox'] }
+  requestHandler: async ({ page, request }) => {
+    if (params.wait_for) {
+      await page.waitForSelector(params.wait_for, { timeout: 15000 });
+    }
+    const items = await page.$$eval(params.selector, (els, fields) => {
+      return els.map(el => {
+        if (fields) {
+          const item = {};
+          for (const [field, sel] of Object.entries(fields)) {
+            const found = el.querySelector(sel);
+            item[field] = found?.textContent?.trim() || "";
+          }
+          return item;
+        }
+        return { text: el.textContent?.trim(), html: el.innerHTML };
+      });
+    }, params.extract_fields || null);
+    results.push(...items);
+
+    if (params.pagination?.next_selector) {
+      const next = await page.$(params.pagination.next_selector);
+      if (next) {
+        const href = await next.getAttribute('href');
+        if (href) await crawler.addRequests([{ url: new URL(href, request.url).href }]);
+      }
+    }
+  },
+});
+
+await crawler.run([params.url]);
+console.log(JSON.stringify({ items: results, pages_crawled: crawler.stats.requestsFinished }));
+```
+
+### Phase 5: Tier 4 — Apify Cloud (residential proxies)
+
+#### 5.1 — Direct REST API from gateway (no container)
+
+Gateway calls Apify API directly. No ephemeral container needed — Apify runs on their infra.
+
+```typescript
+// Inside gateway server
+async function apifyRun(params: ScrapeRequest): Promise<ScrapeResult> {
+  // 1. Run actor
+  const runRes = await fetch(
+    `https://api.apify.com/v2/acts/${params.params.actor_id}/runs?waitForFinish=45`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${APIFY_API_TOKEN}` },
+      body: JSON.stringify(params.params.actor_input),
+    }
+  );
+  const run = await runRes.json();
+
+  // 2. Fetch results
+  if (run.data.status === "SUCCEEDED") {
+    const dataRes = await fetch(
+      `https://api.apify.com/v2/datasets/${run.data.defaultDatasetId}/items?limit=${params.max_results || 50}`
+    );
+    const items = await dataRes.json();
+    return { items, metadata: { source: "apify", cost: run.data.usage } };
   }
+
+  // 3. Still running — return job_id for polling
+  return { items: [], metadata: { source: "apify", job_id: run.data.id, status: run.data.status } };
+}
+```
+
+#### 5.2 — list_actors endpoint
+
+```typescript
+// GET /list-actors?query=...
+async function listActors(query: string) {
+  const res = await fetch(
+    `https://api.apify.com/v2/store?search=${encodeURIComponent(query)}&limit=5`,
+    { headers: { Authorization: `Bearer ${APIFY_API_TOKEN}` } }
+  );
+  const data = await res.json();
+  return data.data.items.map(a => ({
+    id: a.id,
+    name: a.name,
+    title: a.title,
+    description: a.description?.slice(0, 200),
+    monthly_runs: a.stats?.totalRuns,
+    pricing: a.pricing,
+  }));
+}
+```
+
+### Phase 6: Data Agent extension (scraping tools)
+
+#### 6.1 — Extension file (web-scraping.ts)
+
+Registers tools that call the gateway:
+
+```typescript
+// Tools registered:
+// - scrape          (main tool — agent picks tier or auto-escalates)
+// - list_actors     (discover Apify actors)
+// - scrape_status   (poll async Apify jobs)
+
+pi.registerTool({
+  name: "scrape",
+  parameters: Type.Object({
+    url: Type.String(),
+    tier: Type.Optional(Type.Union([
+      Type.Literal("cheerio"),
+      Type.Literal("scrapling"),
+      Type.Literal("playwright"),
+      Type.Literal("apify"),
+    ])),
+    selector: Type.Optional(Type.String()),
+    extract_fields: Type.Optional(Type.Record(Type.String(), Type.String())),
+    pagination: Type.Optional(Type.Object({
+      next_selector: Type.String(),
+      max_pages: Type.Optional(Type.Number()),
+    })),
+    wait_for: Type.Optional(Type.String()),
+    // Apify-specific
+    actor_id: Type.Optional(Type.String()),
+    actor_input: Type.Optional(Type.Any()),
+    // Control
+    auto_escalate: Type.Optional(Type.Boolean()),  // try tiers until success
+    max_results: Type.Optional(Type.Number()),
+  }),
+  async execute(_id, params, signal) {
+    const res = await fetch(`http://scrape-gateway:8090/scrape`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+      signal,
+    });
+    return { content: [{ type: "text", text: await res.text() }] };
+  },
 });
 ```
 
-### Phase 3: Security and resource limits
+#### 6.2 — Auto-escalation logic (in gateway)
 
-#### 3.1 — Execution limits
+If `auto_escalate: true`:
+1. Try Cheerio → if 403 or empty results
+2. Try Scrapling → if still blocked
+3. Try Playwright → if still fails
+4. Try Apify Cloud (if actor_id provided)
+5. Return best result or failure with tier attempted
 
-- **Timeout:** 60s per scrape_custom call (hard kill)
-- **Page count:** Max 10 pages per pagination crawl
-- **Result size:** Max 200 items returned (truncate with warning)
-- **Concurrent requests:** Max 5 in-flight per crawl
-- **Response size:** Skip pages >10MB
-- **Domain allowlist/blocklist:** Configurable. Default: no restrictions in eval. Production: block internal network ranges (10.x, 172.16.x, 192.168.x, localhost)
+### Phase 7: Security and resource limits
 
-#### 3.2 — Container security for scraping
+- **Image allowlist:** Gateway hardcodes exactly 3 image names. Rejects all others.
+- **Container limits:** `--memory=2g --cpus=2` per container. Max 5 concurrent.
+- **Timeout:** Hard kill at configured timeout (default 60s). Gateway sends SIGTERM then SIGKILL after 10s.
+- **Network:** Scraping containers get outbound internet (necessary for scraping) but no access to internal Docker services (separate network without routes to agent containers).
+- **No volume mounts:** Results via stdout only. No filesystem access beyond container's own.
+- **Rate limiting:** Gateway tracks requests-per-domain. Max 2/s per domain, 10/s global. Queue excess with backpressure to data agent.
+- **Result size cap:** Max 200 items inline. Larger results written to /artifacts, path returned.
 
-- Chromium runs with `--no-sandbox` (already in container, acceptable since container IS the sandbox)
-- No access to host network (Docker network isolation)
-- Memory limit on container (4GB) prevents runaway browser instances
-- Scraping runs in same container as Data agent — no escape to other agents' filesystems
+### Phase 8: Testing
 
-#### 3.3 — Rate limiting
+- Gateway unit tests: request validation, image allowlist enforcement
+- Tier 1 integration: scrape a static test page (local HTTP server)
+- Tier 2 integration: scrape same page via Scrapling container
+- Tier 3 integration: scrape a JS-rendered test page
+- Tier 4 integration: run a known Apify actor (web-scraper on test URL)
+- Auto-escalation test: mock 403 from Tier 1, verify escalation to Tier 2
+- Timeout test: slow target, verify container killed at deadline
+- Concurrent limit test: 6 simultaneous requests, verify 5 run + 1 queued
 
-- Per-domain rate limit: max 2 requests/second (configurable)
-- Global rate limit: max 10 requests/second across all domains
-- Respect robots.txt by default (configurable override for specific actors)
-- Back off on 429 responses (exponential, max 30s)
+## Entrypoint delivery
 
-### Phase 4: Output formatting
+Two options for getting entrypoint scripts into ephemeral containers:
 
-#### 4.1 — Result structure
-
-All tools return consistent format:
-
-```typescript
-interface ScrapeResult {
-  items: object[];           // Extracted data
-  metadata: {
-    source: "apify" | "crawlee";
-    url: string;
-    pages_crawled: number;
-    items_found: number;
-    items_returned: number;  // May be less than found (cap)
-    duration_ms: number;
-    errors: string[];        // Non-fatal errors encountered
-  };
-}
+**Option A — Bind mount (simpler for eval):**
+```bash
+docker run --rm -v ./entrypoints/cheerio.mjs:/app/entrypoint.mjs:ro \
+  apify/actor-node-cheerio:22 node /app/entrypoint.mjs '{...}'
 ```
 
-#### 4.2 — Artifact output
-
-For large results (>50 items), write to /artifacts/data/{timestamp}-{domain}.json and return path reference instead of inline data. Keeps LLM context clean.
-
-```typescript
-if (result.items.length > 50) {
-  const path = `/artifacts/data/${Date.now()}-${domain}.json`;
-  writeFileSync(path, JSON.stringify(result, null, 2));
-  return {
-    content: [{ type: "text", text: `Scraped ${result.items.length} items. Full data: ${path}\nPreview (first 10):\n${preview}` }],
-  };
-}
-```
-
-### Phase 5: Testing
-
-- Unit tests for Apify client (mock HTTP responses)
-- Unit tests for CSS selector extraction (static HTML fixtures)
-- Integration test: list_scrapers with real Apify API
-- Integration test: scrape_structured with a known actor (e.g., web-scraper on a test page)
-- Integration test: scrape_custom on a static test page (local HTTP server in test)
-- Rate limit test: verify backoff behavior
-- Timeout test: verify hard kill on long-running crawl
-
-## Dependencies
-
-| Dependency | Purpose | Size impact |
-|------------|---------|-------------|
-| crawlee | Scraping framework (Cheerio + Playwright crawlers) | ~15MB |
-| playwright | Browser automation (Chromium) | ~2MB (lib) + ~400MB (browser binary) |
-
-**Note:** These are the first npm dependencies in the project. The bridge itself remains zero-dep. Only the Data agent container gets these deps (separate Dockerfile layer or separate image).
-
-**Mitigation for image size:** Multi-stage Docker build. Chromium installed only in Data agent image. Other agents keep the slim image.
-
-## Dockerfile changes
-
+**Option B — Thin wrapper images (cleaner for production):**
 ```dockerfile
-# data-agent.Dockerfile (extends shared base)
-FROM paperclip-agent-base AS data-agent
-
-# Install Chromium for Playwright
-RUN npx playwright install chromium --with-deps
-
-# Install scraping deps
-COPY extensions/web-scraping/package.json /app/extensions/web-scraping/
-RUN cd /app/extensions/web-scraping && npm ci --production
+FROM apify/actor-node-cheerio:22
+COPY cheerio.mjs /app/entrypoint.mjs
+ENTRYPOINT ["node", "/app/entrypoint.mjs"]
 ```
+
+Recommendation: Option A for eval (no custom build step). Move to Option B when stabilized.
 
 ## Open Questions
 
-1. **Crawlee vs Scrapling:** User specified Scrapling. Crawlee is architecturally better fit (TypeScript, same ecosystem as Apify). Need explicit confirmation.
+1. **Network policy for scraping containers:** They need outbound internet but shouldn't reach internal services. Custom Docker network with only default gateway? Or iptables rules?
 
-2. **Image size:** Chromium adds ~400MB. Acceptable for eval? If not, start with CheerioCrawler only (no browser, ~15MB total). Add Playwright later when JS-rendered pages are needed.
+2. **Stdout size limits:** If a scrape returns 10MB of JSON via stdout, gateway needs to handle this. Stream to /artifacts above threshold?
 
-3. **Apify token:** Free tier sufficient for eval? Free tier: 5 USD/month compute. May hit limits with heavy scraping.
+3. **Scrapling entrypoint API:** Need to verify `pyd4vinci/scrapling` image's default entrypoint and whether we can override it cleanly with our script.
 
-4. **Proxy support:** Need proxy rotation for production scraping? For eval, direct requests are fine. Add proxy config knob but don't require it.
-
-5. **Per-agent images:** Currently all agents share one Dockerfile. Adding Chromium bloats all images. Move to per-agent Dockerfiles? Or conditional install based on build arg?
+4. **Apify actor input schemas:** Agent needs to know valid inputs for each actor. Cache actor schemas in gateway? Or fetch on demand via list_actors?
 
 ## Definition of Done
 
-- [ ] list_scrapers tool: searches Apify Store, returns top matches with schemas
-- [ ] scrape_structured tool: runs Apify actor, returns results (sync for short, poll for long)
-- [ ] scrape_status tool: polls running Apify jobs
-- [ ] scrape_custom tool: CSS selector extraction with pagination
-- [ ] Cheerio path working (static HTML)
-- [ ] Playwright path working (JS-rendered pages)
+- [ ] Scrape gateway service running in docker-compose
+- [ ] Gateway accepts POST /scrape with tier selection
+- [ ] Tier 1 (Cheerio): spawns container, returns scraped items
+- [ ] Tier 2 (Scrapling): spawns container, anti-detection working
+- [ ] Tier 3 (Playwright): spawns container, JS rendering working
+- [ ] Tier 4 (Apify Cloud): REST API integration, actor discovery
+- [ ] Auto-escalation on failure (403 → next tier)
+- [ ] Image allowlist enforced (no arbitrary docker run)
+- [ ] Container resource limits (memory, CPU, timeout)
 - [ ] Rate limiting per-domain
-- [ ] Timeout enforcement (60s hard kill)
+- [ ] Max 5 concurrent scraping containers
 - [ ] Large results written to /artifacts with path reference
-- [ ] Container security: no host network, memory-bounded
-- [ ] Integration tests with mocked Apify API
-- [ ] Integration test with local HTTP fixture server
-- [ ] Dockerfile for Data agent with Chromium
+- [ ] Data agent extension (scrape, list_actors, scrape_status tools)
+- [ ] Images pre-pulled in setup.sh
 - [ ] APIFY_API_TOKEN documented in .env.example
+- [ ] Integration tests for each tier
 
 ## Risks
 
-- **Image size bloat:** 400MB for Chromium. Mitigation: per-agent Dockerfiles, start Cheerio-only.
-- **Anti-detection arms race:** Sites may block Crawlee. Mitigation: Apify actors are maintained by community, handle this upstream.
-- **Cost creep on Apify:** Heavy actor usage burns through free tier. Mitigation: prefer scrape_custom for simple sites, reserve Apify for complex targets with existing actors.
-- **Chromium stability in container:** Headless Chrome can crash/leak. Mitigation: per-request browser context, hard timeout, container memory limit.
+- **Docker-in-Docker complexity:** Gateway spawning containers via docker.sock. Well-understood pattern but adds operational surface. Mitigation: gateway is minimal, allowlisted images only.
+- **Scrapling image stability:** `pyd4vinci/scrapling` is community-maintained, may break. Mitigation: pin to specific digest, test before updating.
+- **Apify budget burn:** $39/mo can drain fast with large crawls. Mitigation: agent system prompt prioritizes local tiers, uses Apify only when explicitly needed or after local failures.
+- **Stdout buffer overflow:** Large scrape results could exceed Node's buffer. Mitigation: stream to temp file, read back. Or set `maxBuffer` on child process.

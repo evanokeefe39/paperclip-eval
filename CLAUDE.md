@@ -70,6 +70,16 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - DeepSeek handles tool calling reliably; Groq is flaky with function calls — avoid for agentic web search tasks
 - Test extensions locally via bash: `pi --mode json -e extensions/web-search.ts -p "query"` (PowerShell cannot capture Pi stdout)
 
+## Agent escalation
+
+- `escalate` tool (src/agents/extensions/escalate.ts) lets agents pause and request human input via Paperclip issues
+- Requires env vars: `PAPERCLIP_API_URL`, `PAPERCLIP_ADMIN_EMAIL`, `PAPERCLIP_ADMIN_PASS`, `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`
+- Agent IDs set per-container in docker-compose.yml via `CEO_AGENT_ID` / `RESEARCHER_AGENT_ID` in `.env`
+- Auth is session-cookie based (no API keys) — extension signs in as admin to create issues and pause agents
+- Creates issue with `escalation` label, pauses agent, returns tool result telling LLM to wait
+- On resume, LLM checks issue comments via existing Paperclip MCP tools (get_issue, list_comments)
+- `PAPERCLIP_PUBLIC_URL` must be set to `http://paperclip:3100` (docker hostname) for container-to-Paperclip auth to work
+
 ## Inter-agent artifact sharing
 
 - Paperclip has no native file/artifact storage — all orchestration is text-in-prompt
