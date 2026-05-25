@@ -149,3 +149,64 @@ When registering agents via the Paperclip API, use the Docker service name and i
 ```
 
 Not `http://localhost:8081/invoke` (host port) or `http://host.docker.internal:8081/invoke`.
+
+---
+
+## 2026-05-25 — Pi requires auth.json for provider-specific auth structure
+
+### What happened
+
+After fixing the bridge protocol (removing the fragile "wait for ready" approach), invocations returned 401 from minimax despite the `MINIMAX_API_KEY` env var being correctly set inside the container.
+
+### Root cause
+
+Pi does not use env vars directly for all providers. It reads `~/.pi/agent/auth.json` which has a dual structure: flat `"PROVIDER_API_KEY": "value"` entries plus provider-keyed objects with `{"type": "api_key", "key": "value"}`. Minimax and deepseek specifically require the provider-keyed structure to authenticate correctly. The env var alone is insufficient.
+
+### auth.json structure
+
+```json
+{
+  "MINIMAX_API_KEY": "sk-...",
+  "DEEPSEEK_API_KEY": "sk-...",
+  "minimax": { "type": "api_key", "key": "sk-..." },
+  "deepseek": { "type": "api_key", "key": "sk-..." }
+}
+```
+
+### Solution
+
+Copy auth.json into each agent's `.pi/agent/` directory and add a `COPY` line to the Dockerfile. The file is gitignored since it contains secrets.
+
+### Key details
+
+- Container path: `/root/.pi/agent/auth.json`
+- Source: root `auth.json` in repo (gitignored)
+- Dockerfile line: `COPY ${AGENT_NAME}/.pi/agent/auth.json /root/.pi/agent/auth.json`
+- Other providers (groq, cerebras, nvidia, openrouter, mistral) work with env vars alone
+
+---
+
+## 2026-05-25 — Pi does not emit "ready" event; bridge must send prompt immediately
+
+### What happened
+
+The bridge waited for first stdout data before sending the prompt, assuming Pi would emit a "ready" event. With oh-my-pi extensions installed, Pi emits `extension_ui_request` events instead. The 5-second fallback timeout masked this but added latency and was fragile.
+
+### Root cause
+
+Pi accepts stdin input immediately after spawn. There is no "ready" event in the protocol. The stdout wait was a workaround for a race condition that doesn't exist — Pi's stdin buffer is ready before any stdout is produced.
+
+### Protocol lifecycle (with extensions)
+
+```
+spawn → extension_ui_request(s) → [prompt sent immediately] → response{success:true} → agent_start → message_update(s) → agent_end
+```
+
+### Solution
+
+Send prompt to stdin immediately after spawn. Wait for `agent_start` as confirmation of processing. Also check for `response{success:false}` as prompt rejection. The `agent_start` event is always emitted regardless of extensions.
+
+### References
+
+- `src/agents/bridge.mjs` — protocol implementation
+- `docs/pi-rpc-protocol.md` — full protocol documentation

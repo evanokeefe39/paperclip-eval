@@ -18,11 +18,14 @@ src/agents/
   ceo/                      CEO agent config and prompt
     .pi/agent/config.yml
     .pi/agent/models.json
+    .pi/agent/auth.json     Provider auth (gitignored, copy from root auth.json)
     AGENTS.md
   researcher/               Researcher agent config and prompt
     .pi/agent/config.yml
     .pi/agent/models.json
+    .pi/agent/auth.json     Provider auth (gitignored, copy from root auth.json)
     AGENTS.md
+auth.json                    Master auth file — copy into agent .pi/agent/ dirs
 scripts/backup.sh            Backup Paperclip instance (bash/WSL)
 scripts/wipe.sh              Wipe and reset Paperclip instance (bash/WSL)
 tests/                       Hurl, k6, and fixture-based test suite
@@ -39,6 +42,7 @@ LEARNING.md                  Running log of issues and workarounds
 - Agents registered via HTTP adapter, not pi_local (bypasses CLI arg length limit)
 - Pi runs in RPC mode inside containers — JSONL over stdin/stdout
 - bridge.mjs translates between HTTP POST and Pi's JSONL protocol
+- Pi requires auth.json at ~/.pi/agent/auth.json inside containers (provider-specific structure for minimax/deepseek)
 - First-time setup: run setup.ps1. Subsequent starts: docker compose up -d
 
 ## Platform
@@ -62,6 +66,7 @@ LEARNING.md                  Running log of issues and workarounds
 - `local_trusted` mode cannot run in Docker (requires loopback bind, incompatible with port forwarding)
 - `paperclipai auth bootstrap-ceo` CLI force-detects `local_trusted` inside Docker — use bootstrap-invite.cjs instead
 - `paperclipai onboard --yes` ignores all env var overrides and forces local_trusted/loopback
+- Pi env var API keys alone are insufficient for minimax/deepseek — auth.json with provider-keyed structure required
 
 ## Style
 

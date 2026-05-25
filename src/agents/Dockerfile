@@ -11,6 +11,7 @@ COPY bridge.mjs .
 COPY ${AGENT_NAME}/.pi/agent/config.yml /root/.pi/agent/config.yml
 COPY ${AGENT_NAME}/.pi/agent/models.json /root/.pi/agent/models.json
 COPY ${AGENT_NAME}/.pi/agent/settings.json /root/.pi/agent/settings.json
+COPY ${AGENT_NAME}/.pi/agent/auth.json /root/.pi/agent/auth.json
 COPY ${AGENT_NAME}/AGENTS.md /app/AGENTS.md
 
 RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents || true

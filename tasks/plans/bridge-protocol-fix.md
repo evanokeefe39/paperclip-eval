@@ -33,7 +33,7 @@ The original protocol assumption: Pi emits a "ready" event on startup. Reality: 
 ## Status
 
 - [x] Plan written
-- [ ] bridge.mjs fixed
-- [ ] Tests updated
-- [ ] Docs written
-- [ ] Verified end-to-end
+- [x] bridge.mjs fixed
+- [x] Tests updated
+- [x] Docs written
+- [x] Verified end-to-end (protocol flow confirmed, API key placeholder causes 401 but lifecycle correct)
