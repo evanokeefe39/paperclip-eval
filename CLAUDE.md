@@ -54,11 +54,14 @@ LEARNING.md                  Running log of issues and workarounds
 - Each agent gets its own container instance from the same image
 - Workspace mounted at `/workspace` inside containers
 
-## Known bugs in upstream
+## Known issues
 
 - pi_local adapter CLI argument limit: issues #3114, #3180 on paperclip repo
 - Execution contract text duplicated in wake payload (wastes tokens, accelerates limit)
 - `paperclipai --version` can report stale version — check UI settings page instead
+- `local_trusted` mode cannot run in Docker (requires loopback bind, incompatible with port forwarding)
+- `paperclipai auth bootstrap-ceo` CLI force-detects `local_trusted` inside Docker — use bootstrap-invite.cjs instead
+- `paperclipai onboard --yes` ignores all env var overrides and forces local_trusted/loopback
 
 ## Style
 

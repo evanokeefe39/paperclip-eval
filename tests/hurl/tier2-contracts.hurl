@@ -46,7 +46,7 @@ HTTP 200
 jsonpath "$.output" matches "(?i)(pirate|arr|captain|blackbeard|matey|ye)"
 jsonpath "$.exitCode" == 0
 
-# Test 2.7: Events array contains expected protocol messages
+# Test 2.7: Protocol events structure (agent_start, message_update, agent_end)
 POST http://localhost:8081/invoke
 Content-Type: application/json
 {
@@ -54,4 +54,7 @@ Content-Type: application/json
 }
 HTTP 200
 [Asserts]
-jsonpath "$.events[0].type" == "ready"
+jsonpath "$.events" count >= 3
+jsonpath "$.events[?(@.type=='agent_start')]" count >= 1
+jsonpath "$.events[?(@.type=='agent_end')]" count >= 1
+jsonpath "$.events[?(@.type=='message_update')]" count >= 1

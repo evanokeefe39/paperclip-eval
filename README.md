@@ -1,130 +1,131 @@
-# Paperclip + Pi: Containerized Agent Setup
+# Paperclip + Pi: Containerized Agent Evaluation
 
-Evaluation setup for running [Paperclip](https://github.com/paperclipai/paperclip) with [Pi](https://github.com/badlogic/pi-mono) agents in Docker containers, bypassing the Windows CLI argument length limit that breaks the default pi_local adapter.
+Evaluation setup for running [Paperclip](https://github.com/paperclipai/paperclip) with [Pi](https://github.com/badlogic/pi-mono) agents, fully containerized via Docker Compose. Bypasses the Windows CLI argument length limit that breaks the default pi_local adapter.
 
 ## Why containers instead of pi_local
 
-Paperclip's pi_local adapter passes the entire system prompt as a `--append-system-prompt` CLI argument. On Windows this hits the ~8,191 character cmd.exe limit, causing either "The command line is too long" errors or silent prompt fragmentation. See [LEARNING.md](./LEARNING.md) for details.
+Paperclip's pi_local adapter passes the entire system prompt as a `--append-system-prompt` CLI argument. On Windows this hits the ~8,191 character cmd.exe limit, causing either "The command line is too long" errors or silent prompt fragmentation where Pi receives each word as a separate message. See [LEARNING.md](./LEARNING.md) for details.
 
-The containerized approach uses Paperclip's HTTP adapter instead. Prompts go as JSON over HTTP — no shell, no argument limits.
+The containerized approach uses Paperclip's HTTP adapter instead. Prompts go as JSON over HTTP, no shell, no argument limits.
 
 ## Architecture
 
 ```
-Paperclip server (host or container)
+Host browser (http://localhost:3100)
     │
-    │  HTTP POST (JSON payload with prompt + context)
     ▼
-┌─────────────────────────┐
-│  Pi agent container      │
-│  HTTP-to-RPC bridge      │  ← pi-bridge/bridge.mjs
-│    │          ▲           │
-│    │ stdin    │ stdout    │
-│    ▼          │           │
-│  pi --mode rpc            │
-└─────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  Docker Compose (agents_default network)                    │
+│                                                             │
+│  ┌──────────────────────┐    HTTP POST     ┌─────────────┐  │
+│  │ Paperclip            │ ──────────────── │ CEO bridge  │  │
+│  │ ghcr.io/paperclipai/ │  http://ceo:8080 │ bridge.mjs  │  │
+│  │   paperclip:latest   │                  │   │      ▲   │  │
+│  │                      │    HTTP POST     │   │stdin │   │  │
+│  │ :3100 (embedded PG)  │ ──────────────── │   ▼      │   │  │
+│  └──────────────────────┘  http://          │ pi --mode│   │  │
+│                            researcher:8080  │    rpc   │   │  │
+│                                            └─────────────┘  │
+│                                            ┌─────────────┐  │
+│                                            │ Researcher  │  │
+│                                            │ bridge.mjs  │  │
+│                                            │ pi --mode   │  │
+│                                            │    rpc      │  │
+│                                            └─────────────┘  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 Each agent gets its own container from the same image. The bridge translates HTTP requests into Pi's JSONL stdin/stdout protocol.
 
 ## Prerequisites
 
-- Docker and Docker Compose
-- Node.js 20+
-- Git
-- A working LLM API key (OpenRouter, DeepSeek, etc.)
+- Docker Desktop
+- PowerShell (Windows 11)
+- LLM API keys for your providers (see `.env.example`)
+
+No local Node.js, Paperclip, or Pi installation needed.
 
 ## Quick start
 
-### 1. Install Paperclip
+### 1. Configure API keys
 
 ```powershell
-npx paperclipai onboard --yes
+cp src/agents/.env.example src/agents/.env
+# Edit .env with your provider API keys
 ```
 
-Starts the server at http://localhost:3100 with embedded PostgreSQL.
-
-### 2. Install Pi
+### 2. First-time setup
 
 ```powershell
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+.\src\agents\setup.ps1
 ```
 
-Verify standalone:
+This starts all containers, bootstraps the Paperclip instance, creates a company, and registers the CEO and Researcher agents. Takes about 30 seconds after images are pulled.
+
+### 3. Subsequent starts
 
 ```powershell
-pi --mode rpc --no-session --provider openrouter --model deepseek/deepseek-chat-v3-0324:free
+docker compose -f src/agents/docker-compose.yml up -d
 ```
 
-Type `{"type":"prompt","message":"Say hello"}` and press Enter. You should see JSONL events ending with `agent_end`. Ctrl+C to exit.
+The Paperclip data volume persists across restarts, no re-setup needed.
 
-### 3. Build and start bridge containers
+### 4. Access
 
-```powershell
-cd pi-bridge
-docker compose up -d --build
-```
-
-Edit `pi-bridge/docker-compose.yml` to configure providers, models, and API keys per agent. See the file for the full schema.
-
-### 4. Configure Paperclip to use HTTP adapter
-
-The HTTP adapter is built in but not in the UI wizard. Create agents via API:
-
-```powershell
-curl -X POST http://localhost:3100/api/companies/<COMPANY_ID>/agents ^
-  -H "Content-Type: application/json" ^
-  -d "{
-    \"name\": \"CEO\",
-    \"role\": \"ceo\",
-    \"adapterType\": \"http\",
-    \"adapterConfig\": {
-      \"url\": \"http://host.docker.internal:8081/invoke\",
-      \"method\": \"POST\",
-      \"headers\": { \"Content-Type\": \"application/json\" },
-      \"timeoutMs\": 300000,
-      \"payloadTemplate\": {
-        \"prompt\": \"{{renderedPrompt}}\",
-        \"systemPrompt\": \"{{systemPrompt}}\",
-        \"agentId\": \"{{agent.id}}\",
-        \"runId\": \"{{run.id}}\"
-      }
-    }
-  }"
-```
-
-Replace `<COMPANY_ID>` with your company UUID from the Paperclip UI. If Paperclip also runs in Docker, use the container service name instead of `host.docker.internal`.
+- Paperclip UI: http://localhost:3100
+- CEO bridge: http://localhost:8081
+- Researcher bridge: http://localhost:8082
 
 ### 5. Validate
 
-**Bridge health check:**
+Health check:
 
 ```powershell
-curl http://localhost:8081/invoke ^
-  -H "Content-Type: application/json" ^
-  -d "{\"prompt\": \"Say hello and confirm you are working.\"}"
+Invoke-RestMethod http://localhost:8081/health
+Invoke-RestMethod http://localhost:8082/health
 ```
 
-**Paperclip heartbeat test:** Create an issue in the UI, assign to your HTTP-adapter agent, trigger a heartbeat from the Runs page. Check the transcript for a coherent, unfragmented response.
+Direct bridge test:
 
-**Argument length test:** Create a task with 500+ words. If the run succeeds with a coherent response, the CLI limit is no longer a factor.
+```powershell
+Invoke-RestMethod http://localhost:8081/invoke -Method POST `
+  -ContentType 'application/json' `
+  -Body '{"prompt":"Say hello."}'
+```
 
-## Known limitations
-
-- HTTP adapter not in UI wizard — agents must be created via API or config edit
-- Session persistence across heartbeats requires mounting a volume and passing `--session-dir` to Pi
-- Bridge shim is a starting point, not production-ready (no auth, no streaming, no retry)
-- Payload template variables (`{{renderedPrompt}}`, `{{systemPrompt}}`) need verification against your Paperclip version
-- Cost tracking may not work since the HTTP adapter doesn't parse Pi's token usage
+Trigger a Paperclip heartbeat from the UI or API, then check the agent's transcript for a coherent response.
 
 ## File inventory
 
 | File | Purpose |
 |------|---------|
-| README.md | This file |
-| CLAUDE.md | Agent instructions and project context |
-| LEARNING.md | Running log of issues found during evaluation |
-| pi-bridge/bridge.mjs | HTTP-to-RPC bridge shim |
-| pi-bridge/Dockerfile | Container image for Pi agents |
-| pi-bridge/docker-compose.yml | Multi-agent container orchestration |
-| scripts/ | Utility scripts (backup, wipe) |
+| `src/agents/docker-compose.yml` | Full stack: Paperclip + agent containers |
+| `src/agents/bridge.mjs` | HTTP-to-RPC bridge shim (zero npm deps) |
+| `src/agents/Dockerfile` | Agent container image (node:22-slim + Pi CLI) |
+| `src/agents/setup.ps1` | One-shot bootstrap and agent registration |
+| `src/agents/bootstrap-invite.cjs` | DB-level admin bootstrap (bypasses CLI bug) |
+| `src/agents/.env.example` | Provider API key template |
+| `src/agents/ceo/` | CEO agent config (AGENTS.md, Pi config) |
+| `src/agents/researcher/` | Researcher agent config |
+| `tests/` | Hurl, k6, and PowerShell test suite |
+| `scripts/` | Backup and wipe scripts (bash/WSL) |
+| `LEARNING.md` | Running log of issues and workarounds |
+| `.claude/skills/paperclip-api.md` | Paperclip API reference |
+
+## Known limitations
+
+- Paperclip's `local_trusted` mode cannot run in Docker (requires loopback binding). Must use `authenticated` mode.
+- The `paperclipai auth bootstrap-ceo` CLI does not work inside Docker containers. Workaround: `bootstrap-invite.cjs` inserts the invite directly into the embedded PostgreSQL.
+- HTTP adapter is not in Paperclip's UI wizard. Agents are registered via the API during setup.
+- Bridge shim is a starting point, not production-ready (no auth, no streaming, no retry).
+- Cost tracking may not work since the HTTP adapter doesn't parse Pi's token usage.
+
+## Teardown
+
+```powershell
+# Stop containers, keep data
+docker compose -f src/agents/docker-compose.yml down
+
+# Stop containers and delete all data (fresh start)
+docker compose -f src/agents/docker-compose.yml down -v
+```

@@ -229,11 +229,12 @@ function Run-Tier2 {
 
         if ($exitCode -eq 0) {
             $testNames = @(
-                @{ Id = "2.1"; Name = "Wake payload" },
-                @{ Id = "2.2"; Name = "System prompt passthrough" },
-                @{ Id = "2.3"; Name = "Error on invalid JSON" },
+                @{ Id = "2.1"; Name = "Wake payload acceptance" },
+                @{ Id = "2.2"; Name = "Large payload (bypass pi_local limit)" },
+                @{ Id = "2.3"; Name = "Malformed JSON rejected" },
                 @{ Id = "2.4"; Name = "Empty body rejected" },
-                @{ Id = "2.5"; Name = "Timeout behavior" }
+                @{ Id = "2.5"; Name = "System prompt passthrough" },
+                @{ Id = "2.7"; Name = "Protocol events structure" }
             )
             $perTest = $timer.Elapsed.TotalSeconds / $testNames.Count
             foreach ($t in $testNames) {

@@ -1,5 +1,7 @@
 FROM node:22-slim
 
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
 ARG AGENT_NAME
@@ -8,7 +10,10 @@ WORKDIR /app
 COPY bridge.mjs .
 COPY ${AGENT_NAME}/.pi/agent/config.yml /root/.pi/agent/config.yml
 COPY ${AGENT_NAME}/.pi/agent/models.json /root/.pi/agent/models.json
+COPY ${AGENT_NAME}/.pi/agent/settings.json /root/.pi/agent/settings.json
 COPY ${AGENT_NAME}/AGENTS.md /app/AGENTS.md
+
+RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents || true
 
 RUN mkdir -p /workspace
 

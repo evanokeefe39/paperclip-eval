@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 
 const PORT = process.env.BRIDGE_PORT || 8080;
 const PI_PROVIDER = process.env.PI_PROVIDER || "minimax";
-const PI_MODEL = process.env.PI_MODEL || "minimax-m2.7";
+const PI_MODEL = process.env.PI_MODEL || "MiniMax-M2.7";
 const BRIDGE_TIMEOUT_MS = parseInt(process.env.BRIDGE_TIMEOUT_MS, 10) || 120000;
 const VERSION = "1.0.0";
 
@@ -144,6 +144,10 @@ const server = http.createServer(async (req, res) => {
     spawnError = err;
   });
 
+  const promptSentAt = Date.now();
+  pi.stdin.write(JSON.stringify({ type: "prompt", message: prompt }) + "\n");
+  log("info", "pi_prompt_sent", { prompt_length: prompt.length });
+
   const events = [];
   let output = "";
   let stderrOutput = "";
@@ -171,13 +175,11 @@ const server = http.createServer(async (req, res) => {
     }
   });
 
-  // --- Wait for ready, with timeout ---
-  const readyStart = Date.now();
   try {
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         clearInterval(check);
-        reject(new Error("timeout waiting for pi ready"));
+        reject(new Error("timeout waiting for pi agent_start"));
       }, BRIDGE_TIMEOUT_MS);
 
       const check = setInterval(() => {
@@ -187,7 +189,13 @@ const server = http.createServer(async (req, res) => {
           reject(spawnError);
           return;
         }
-        if (events.some((e) => e.type === "ready")) {
+        if (events.some((e) => e.type === "response" && e.success === false)) {
+          clearInterval(check);
+          clearTimeout(timeout);
+          reject(new Error("pi rejected prompt"));
+          return;
+        }
+        if (events.some((e) => e.type === "agent_start")) {
           clearInterval(check);
           clearTimeout(timeout);
           resolve();
@@ -197,8 +205,8 @@ const server = http.createServer(async (req, res) => {
       pi.on("close", () => {
         clearInterval(check);
         clearTimeout(timeout);
-        if (!events.some((e) => e.type === "ready")) {
-          reject(new Error("pi process exited before ready"));
+        if (!events.some((e) => e.type === "agent_start")) {
+          reject(new Error("pi process exited before agent_start"));
         }
       });
     });
@@ -214,9 +222,7 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ error: errorType, detail: err.message }));
   }
 
-  log("info", "pi_ready", { time_to_ready_ms: Date.now() - readyStart });
-
-  pi.stdin.write(JSON.stringify({ type: "prompt", message: prompt }) + "\n");
+  log("info", "pi_ready", { wait_ms: Date.now() - promptSentAt, prompt_acknowledged: true, extensions_active: events.some((e) => e.type === "extension_ui_request") });
 
   // --- Wait for agent_end or process exit, with timeout ---
   try {

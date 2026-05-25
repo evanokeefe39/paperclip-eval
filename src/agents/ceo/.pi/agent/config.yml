@@ -1,2 +1,71 @@
-provider: minimax
-model: minimax-m2.7
+modelRoles:
+  smol:    groq/llama-3.1-8b-instant
+  default: nvidia/meta/llama-4-maverick-17b-128e-instruct
+  agentic: minimax/MiniMax-M2.7
+  plan:    deepseek/deepseek-reasoner
+  review:  deepseek/deepseek-reasoner
+  commit:  groq/llama-3.1-8b-instant
+
+retry:
+  enabled: true
+  maxRetries: 5
+  fallbackChains:
+    smol:
+      - groq/llama-3.1-8b-instant
+      - cerebras/llama3.1-8b
+      - nvidia/meta/llama-3.1-8b-instruct
+    default:
+      - nvidia/meta/llama-4-maverick-17b-128e-instruct
+      - groq/meta-llama/llama-4-scout-17b-16e-instruct
+      - cerebras/llama-3.3-70b
+      - deepseek/deepseek-chat
+      - openrouter/meta-llama/llama-4-maverick:free
+      - mistral/mistral-small-latest
+    agentic:
+      - minimax/MiniMax-M2.7
+      - deepseek/deepseek-chat
+      - nvidia/meta/llama-4-maverick-17b-128e-instruct
+      - openrouter/qwen/qwen3-coder:free
+    plan:
+      - deepseek/deepseek-reasoner
+      - minimax/MiniMax-M2.7
+      - nvidia/meta/llama-3.1-70b-instruct
+      - openrouter/deepseek/deepseek-r1:free
+      - mistral/codestral-latest
+    review:
+      - deepseek/deepseek-reasoner
+      - minimax/MiniMax-M2.7
+      - nvidia/meta/llama-3.1-70b-instruct
+      - openrouter/qwen/qwen3-coder:free
+      - mistral/codestral-latest
+    commit:
+      - groq/llama-3.1-8b-instant
+      - cerebras/llama3.1-8b
+      - nvidia/meta/llama-3.1-8b-instruct
+  fallbackRevertPolicy: cooldown-expiry
+
+contextPromotion:
+  enabled: true
+
+compaction:
+  enabled: true
+  strategy: context-full
+  autoContinue: true
+
+edit:
+  mode: hashline
+  fuzzyMatch: true
+
+lsp:
+  enabled: true
+  diagnosticsOnWrite: true
+
+cycleOrder:
+  - smol
+  - default
+  - agentic
+  - plan
+
+skills:
+  enabled: true
+  enableSkillCommands: true

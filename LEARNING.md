@@ -36,3 +36,116 @@ Open bug as of v2026.517.0. No fix in any current release.
 - [Issue #3114 — fragmented message to pi agent](https://github.com/paperclipai/paperclip/issues/3114)
 - [Issue #3180 — Pi adapter sends fragmented messages word by word](https://github.com/paperclipai/paperclip/issues/3180)
 - [Issue #1673 — Windows/WSL2 setup guide for local adapters](https://github.com/paperclipai/paperclip/issues/1673)
+
+---
+
+## 2026-05-25 — Paperclip Docker deployment requires authenticated mode
+
+### What happened
+
+Attempted to run Paperclip in Docker using `local_trusted` deployment mode (the default). The server refused to start with `local_trusted requires server.bind=loopback`. Docker containers must bind to `0.0.0.0` for port forwarding to work, which is incompatible with loopback-only binding.
+
+### Root cause
+
+`local_trusted` mode hardcodes `server.bind=loopback` and rejects any override. This is intentional security — unauthenticated mode should only be reachable from the local machine. In Docker, binding to `127.0.0.1` means other containers on the same network cannot reach the service, and the host cannot reach it through published ports.
+
+### Solution
+
+Run Paperclip in `authenticated` mode with `PAPERCLIP_DEPLOYMENT_EXPOSURE=private`. This allows `HOST=0.0.0.0` binding while requiring session-based auth for API access. Trade-off: requires a bootstrap flow to create the first admin user.
+
+### References
+
+- Environment vars: `PAPERCLIP_DEPLOYMENT_MODE`, `PAPERCLIP_DEPLOYMENT_EXPOSURE`, `HOST`
+- Valid `server.bind` values in config.json: `loopback`, `lan`, `tailnet`, `custom`
+- The server itself accepts `wildcard` via env var but the CLI config schema does not
+
+---
+
+## 2026-05-25 — bootstrap-ceo CLI does not work inside Docker
+
+### What happened
+
+The `paperclipai auth bootstrap-ceo` CLI command, which generates the admin invite token for a fresh authenticated instance, refuses to run inside the Paperclip Docker container. It detects `local_trusted` deployment mode regardless of environment variables or config.json content, and exits with "Bootstrap CEO invite is only required for authenticated mode."
+
+### Root cause
+
+The CLI has its own deployment mode detection that overrides the config file. It appears to detect that it is running on localhost and forces `local_trusted` mode. This detection runs before reading any config or env vars. The `--yes` flag on `onboard` has the same behavior — it forces `local_trusted` with loopback binding, ignoring all env overrides.
+
+### What did not work
+
+1. Setting `PAPERCLIP_DEPLOYMENT_MODE=authenticated` as env var on `docker exec`
+2. Writing a `config.json` with `deployment.mode: "authenticated"` — CLI still detected `local_trusted`
+3. Running the CLI from the Windows host pointing at `--base-url http://localhost:3100` — same detection issue
+4. Running `onboard --yes` inside container — it forces `local_trusted` and starts a second server on loopback
+
+### Solution
+
+Bypass the CLI entirely. The bootstrap invite is just a database insert into the `invites` table. Created `bootstrap-invite.cjs` which uses the `pg` module already present in the Paperclip image at `/app/node_modules/.pnpm/pg@8.18.0/node_modules/pg` to connect to the embedded PostgreSQL at `127.0.0.1:54329` and insert a `bootstrap_ceo` invite directly. The invite token is then accepted via the `POST /api/invites/{token}/accept` API endpoint.
+
+### Key details
+
+- Embedded PostgreSQL connection: `postgres://paperclip:paperclip@127.0.0.1:54329/paperclip`
+- Invite token format: `pcp_bootstrap_` + 24 random hex bytes
+- Token is stored as SHA-256 hash in the `invites` table
+- The `create-auth-bootstrap-invite.ts` script in the Paperclip repo (`packages/db/scripts/`) was the reference implementation
+
+### References
+
+- `bootstrap-invite.cjs` in `src/agents/`
+- Paperclip source: `packages/db/scripts/create-auth-bootstrap-invite.ts`
+- Paperclip source: `cli/src/commands/auth-bootstrap-ceo.ts`
+
+---
+
+## 2026-05-25 — Paperclip GHCR image vs building from source
+
+### What happened
+
+Explored options for running Paperclip in Docker. The repo has a Dockerfile and quickstart docker-compose, but also publishes pre-built images.
+
+### Finding
+
+Paperclip publishes multi-arch images to GitHub Container Registry at `ghcr.io/paperclipai/paperclip:latest`. Tags include `latest` (from master), semver tags, and SHA-based tags. No Docker Hub image exists.
+
+The CI workflow is at `.github/workflows/docker.yml`. Images are built for `linux/amd64` and `linux/arm64`.
+
+### Decision
+
+Use the GHCR image instead of cloning and building from source. Avoids needing the full repo (~large monorepo) in the project.
+
+### Config.json requirement
+
+The server starts fine from env vars alone — no config.json needed for the server process. However, the `paperclipai` CLI (used for bootstrap-ceo, configure, doctor) requires a valid `config.json` at `$PAPERCLIP_HOME/instances/default/config.json`. The schema requires `$meta.version`, `$meta.updatedAt`, `$meta.source` (enum: `onboard`, `configure`, `doctor`), and `server.bind` (enum: `loopback`, `lan`, `tailnet`, `custom`).
+
+A template config is kept at `src/agents/paperclip-config.json` and copied into the container via `docker cp` when needed.
+
+---
+
+## 2026-05-25 — Docker networking between Paperclip and agent bridges
+
+### What happened
+
+Initially ran Paperclip on the host and agent bridges in Docker. Agent adapter URLs used `http://host.docker.internal:8081` (wrong — Paperclip on host should use `localhost:8081`). Later moved everything into Docker.
+
+### Finding
+
+When all services are in the same docker-compose, they share a Docker network and can reach each other by service name:
+- Paperclip reaches CEO bridge at `http://ceo:8080` (internal port, not published port)
+- Paperclip reaches Researcher bridge at `http://researcher:8080`
+- Host browser reaches Paperclip UI at `http://localhost:3100` (published port)
+- Host reaches bridges at `http://localhost:8081`, `http://localhost:8082` (published ports)
+
+`host.docker.internal` is only needed when a container needs to reach a host-only service. With everything in Docker, it is not needed.
+
+### Agent adapter URL pattern
+
+When registering agents via the Paperclip API, use the Docker service name and internal port:
+```json
+{
+  "adapterConfig": {
+    "url": "http://ceo:8080/invoke"
+  }
+}
+```
+
+Not `http://localhost:8081/invoke` (host port) or `http://host.docker.internal:8081/invoke`.
