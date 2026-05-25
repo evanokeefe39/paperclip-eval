@@ -1,0 +1,2 @@
+- evaluate how pi agent and paperclip work together and see how notifications can be integrated 
+- see if docker desktop is natural fit (see windows cmd path issue)  
