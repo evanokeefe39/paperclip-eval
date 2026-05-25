@@ -24,6 +24,12 @@ services:
       PAPERCLIP_DEPLOYMENT_EXPOSURE: "private"
     volumes:
       - paperclip-data:/paperclip
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3100/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 12
 
   ceo:
     <<: *agent
@@ -36,9 +42,10 @@ services:
       - "8081:8080"
     volumes:
       - ceo-workspace:/workspace
+      - shared-artifacts:/artifacts
     depends_on:
       paperclip:
-        condition: service_started
+        condition: service_healthy
 
   researcher:
     <<: *agent
@@ -51,11 +58,13 @@ services:
       - "8082:8080"
     volumes:
       - researcher-workspace:/workspace
+      - shared-artifacts:/artifacts
     depends_on:
       paperclip:
-        condition: service_started
+        condition: service_healthy
 
 volumes:
   paperclip-data:
   ceo-workspace:
   researcher-workspace:
+  shared-artifacts:

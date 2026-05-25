@@ -264,12 +264,12 @@ One line. All logic lives in bash.
 
 ## Definition of Done
 
-- [ ] .dockerignore prevents .env from entering build context
-- [ ] Paperclip healthcheck in compose, agents depend on service_healthy
-- [ ] bootstrap-invite.cjs survives Paperclip image version bumps
-- [ ] setup.sh runs clean on first invocation (creates everything)
-- [ ] setup.sh runs clean on second invocation (skips everything, prints existing IDs)
-- [ ] setup.sh fails loudly on network/API errors with actionable messages
-- [ ] No credentials hardcoded in script source — all from env with defaults
-- [ ] Adding a new agent requires only a new directory with config files
-- [ ] CLAUDE.md and LEARNING.md updated
+- [x] .dockerignore prevents .env from entering build context
+- [x] Paperclip healthcheck in compose, agents depend on service_healthy
+- [x] bootstrap-invite.cjs survives Paperclip image version bumps
+- [x] setup.sh runs clean on first invocation (creates everything)
+- [x] setup.sh runs clean on second invocation (skips everything, prints existing IDs)
+- [x] setup.sh fails loudly on network/API errors with actionable messages
+- [x] No credentials hardcoded in script source — all from env with defaults
+- [x] Adding a new agent requires only a new directory with config files
+- [x] CLAUDE.md and LEARNING.md updated

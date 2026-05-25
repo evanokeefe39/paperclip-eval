@@ -1,0 +1,15 @@
+{
+  "name": "CEO",
+  "role": "ceo",
+  "title": "Chief Executive Officer",
+  "icon": "crown",
+  "capabilities": "Strategic leadership, task prioritization, cross-agent coordination",
+  "adapterType": "http",
+  "adapterConfig": {
+    "url": "http://ceo:8080/invoke",
+    "timeoutSec": 300
+  },
+  "runtimeConfig": {
+    "heartbeat": { "enabled": false, "wakeOnDemand": true }
+  }
+}

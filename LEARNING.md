@@ -271,6 +271,54 @@ Change the file paths in the hurl files to be relative to the hurl file's direct
 
 ---
 
+## 2026-05-25 — pnpm hardcoded paths break on image upgrades
+
+### What happened
+
+`bootstrap-invite.cjs` used `require("/app/node_modules/.pnpm/pg@8.18.0/node_modules/pg")` — a path that includes the exact pnpm version hash. When the Paperclip image updated pg or pnpm, the path stopped existing and the script failed.
+
+### Root cause
+
+pnpm stores packages in a content-addressable layout at `.pnpm/<name>@<version>/node_modules/<name>`. The version component changes on every dependency bump. Hardcoding it couples the script to a specific lockfile state.
+
+### Solution
+
+Use `require.resolve("pg", { paths: ["/app"] })` which walks the `node_modules` tree from `/app` using Node's module resolution algorithm. Survives pnpm version bumps, lockfile changes, and hoisting layout changes.
+
+### Key details
+
+- `require.resolve` with `paths` option is stable Node API (v8.9+)
+- The Paperclip image always has pg installed at `/app` — it's a direct dependency of the server
+
+---
+
+## 2026-05-25 — Setup scripts must be idempotent for CI and re-runs
+
+### What happened
+
+`setup.ps1` and `bootstrap-invite.cjs` assumed a fresh Paperclip instance. Running them twice would fail: duplicate invite inserts, duplicate company creation (409), duplicate agent registration.
+
+### Root cause
+
+No existence checks before create operations. Each script assumed it was the first run.
+
+### Solution
+
+Every create operation now checks for existing state first:
+
+- **bootstrap-invite.cjs**: queries for unexpired `bootstrap_ceo` invite before inserting. Exits cleanly if one exists.
+- **setup.sh create_company()**: GETs `/api/companies`, searches by name, returns existing ID if found.
+- **setup.sh register_agent()**: GETs `/api/companies/{id}/agents`, searches by name, skips if found.
+- **setup.sh authenticate()**: tries sign-up first, falls back to sign-in (existing user).
+
+### Key details
+
+- Idempotency makes the script safe for CI pipelines where the environment may persist between runs
+- Re-runs print "(existing)" next to each ID so the operator knows nothing was created
+- The pattern: check → skip-if-exists → create-if-new → return-id-either-way
+
+---
+
 ## 2026-05-25 — Hurl JSONPath filter `count` fails on single-match results
 
 ### What happened

@@ -1,0 +1,16 @@
+{
+  "name": "Researcher",
+  "role": "researcher",
+  "title": "Research Analyst",
+  "icon": "search",
+  "reportsTo": "CEO",
+  "capabilities": "Information gathering, structured research, source analysis",
+  "adapterType": "http",
+  "adapterConfig": {
+    "url": "http://researcher:8080/invoke",
+    "timeoutSec": 300
+  },
+  "runtimeConfig": {
+    "heartbeat": { "enabled": false, "wakeOnDemand": true }
+  }
+}

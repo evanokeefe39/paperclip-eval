@@ -10,17 +10,21 @@ Evaluation repo for running Paperclip agent orchestration with Pi agents via Doc
 src/agents/
   bridge.mjs               HTTP-to-RPC bridge shim (Node, zero deps)
   Dockerfile               Shared image — node:22-slim + Pi CLI
-  docker-compose.yml        Full stack: Paperclip + agent containers
-  setup.ps1                 One-shot setup: bootstrap, create company, register agents
-  bootstrap-invite.cjs      DB-level bootstrap invite creator (bypasses CLI)
+  docker-compose.yml        Full stack: Paperclip + agent containers (healthcheck on Paperclip)
+  setup.sh                  Canonical setup script (bash) — idempotent, env-configurable
+  setup.ps1                 Thin WSL wrapper for setup.sh
+  bootstrap-invite.cjs      DB-level bootstrap invite creator (idempotent, bypasses CLI)
   paperclip-config.json     Config template for Paperclip CLI compatibility
+  .dockerignore             Excludes .env and non-build files from image context
   .env.example              Template for provider API keys
   ceo/                      CEO agent config and prompt
+    agent.json              Agent registration metadata (name, role, adapter config)
     .pi/agent/config.yml
     .pi/agent/models.json
     .pi/agent/auth.json     Provider auth (gitignored, copy from root auth.json)
     AGENTS.md
   researcher/               Researcher agent config and prompt
+    agent.json              Agent registration metadata (name, role, adapter config)
     .pi/agent/config.yml
     .pi/agent/models.json
     .pi/agent/auth.json     Provider auth (gitignored, copy from root auth.json)
@@ -32,7 +36,12 @@ tests/                       Hurl, k6, and fixture-based test suite
 tests/results/               Timestamped test run reports
 .claude/skills/paperclip-api.md  API reference skill
 LEARNING.md                  Running log of issues and workarounds
+ROADMAP.md                   Planned improvements (MinIO, etc) — eval stage
 ```
+
+## Project stage
+
+Evaluation. Validating Paperclip + Pi orchestration patterns before committing to production infrastructure. See ROADMAP.md for planned next steps (MinIO artifact storage, etc).
 
 ## Key context
 
@@ -44,7 +53,18 @@ LEARNING.md                  Running log of issues and workarounds
 - Pi runs in RPC mode inside containers — JSONL over stdin/stdout
 - bridge.mjs translates between HTTP POST and Pi's JSONL protocol
 - Pi requires auth.json at ~/.pi/agent/auth.json inside containers (provider-specific structure for minimax/deepseek)
-- First-time setup: run setup.ps1. Subsequent starts: docker compose up -d
+- First-time setup: run setup.sh (or setup.ps1 from PowerShell, which delegates to setup.sh via WSL). Subsequent starts: docker compose up -d
+- setup.sh is idempotent — safe to re-run. Skips existing companies/agents and prints their IDs
+- All setup config via env vars: PAPERCLIP_URL, ADMIN_EMAIL, ADMIN_PASS, COMPANY_NAME, COMPOSE_FILE, SKIP_BUILD
+- Adding a new agent: create a directory with .pi/agent/config.yml and agent.json, then re-run setup.sh
+
+## Inter-agent artifact sharing
+
+- Paperclip has no native file/artifact storage — all orchestration is text-in-prompt
+- Shared Docker volume `shared-artifacts` mounted at `/artifacts` in all agent containers
+- Agents write files to `/artifacts/{context}/{filename}`, pass path references in text output (not file content)
+- Consuming agent reads from `/artifacts/...` path received in its wake payload
+- This is the eval-stage solution (Option A). ROADMAP.md describes Option B (MinIO with S3 URIs, presigned URLs, access control)
 
 ## Platform
 
