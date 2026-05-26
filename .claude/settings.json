@@ -1,4 +1,9 @@
 {
+  "permissions": {
+    "deny": [
+      "PowerShell"
+    ]
+  },
   "mcpServers": {
     "playwright": {
       "command": "npx",

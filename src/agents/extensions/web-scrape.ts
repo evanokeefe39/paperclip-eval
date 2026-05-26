@@ -43,13 +43,12 @@ function hasScraplingFetcher(): boolean {
 }
 
 function hasScraplingBrowser(): boolean {
-  if (!hasPython()) return false;
+  // Marker file created by data/Dockerfile after `scrapling install`
+  // Import-based detection won't work: DynamicFetcher import succeeds
+  // even without browser binaries (scrapling[fetchers] installs the pip
+  // package but not the browsers)
   try {
-    execFileSync(
-      "python3",
-      ["-c", "from scrapling import PlayWrightFetcher"],
-      { encoding: "utf-8", timeout: 10000 }
-    );
+    require("node:fs").accessSync("/app/.browsers-installed");
     return true;
   } catch {
     return false;
@@ -370,7 +369,7 @@ export default function (pi: ExtensionAPI) {
       name: "scrape_browser",
       label: "Browser Scraper",
       description:
-        "Scrape structured data using a headless browser for JavaScript-rendered pages. Uses Python scrapling PlayWrightFetcher with anti-detection measures. Slower but handles SPAs, dynamic content, and pages requiring JS execution.",
+        "Scrape structured data using a headless browser for JavaScript-rendered pages. Uses Python scrapling DynamicFetcher with anti-detection measures. Slower but handles SPAs, dynamic content, and pages requiring JS execution.",
       promptSnippet:
         "Scrape JS-rendered pages using headless browser with anti-detection.",
       parameters: Type.Object({
@@ -417,7 +416,7 @@ export default function (pi: ExtensionAPI) {
           const text = formatScrapeResult(
             parsed,
             params.url,
-            "browser (scrapling PlayWrightFetcher)"
+            "browser (scrapling DynamicFetcher)"
           );
 
           return {

@@ -296,6 +296,143 @@ Centralization mechanism that reads raw `learnings.md` from every agent, detects
 
 ---
 
+## Planned: Docker image size optimization
+
+Current image sizes are dominated by Pi extension packages:
+
+| Image | Size | Breakdown |
+|-------|------|-----------|
+| CEO (base) | 1.5GB | node:22-slim ~500MB, Pi CLI 187MB, `shitty-extensions` + `@ifi/pi-extension-subagents` **689MB** |
+| Researcher | 1.87GB | base + scrapling[fetchers] ~370MB |
+| Data | 3.28GB | base + scrapling[fetchers] + Chromium/Playwright ~1.8GB |
+
+Pi extension install (`npm:shitty-extensions npm:@ifi/pi-extension-subagents`) is 689MB alone — nearly half the CEO image. CEO probably doesn't need subagent extensions at all since Paperclip handles orchestration.
+
+### Actions
+
+- Audit which Pi extensions each agent actually uses — remove unused ones per agent
+- Consider agent-specific extension installs (CEO gets none, researcher gets subagents only, etc.)
+- Multi-stage builds to reduce layer bloat
+- Pin scrapling version to avoid pulling unnecessary transitive deps
+- Evaluate if `shitty-extensions` is used by any agent — name suggests experimental, may be removable
+- For data image: investigate slim Chromium alternatives or shared browser cache volume
+
+### Blocked on
+
+- Understanding which Pi extensions are actually invoked during eval runs (need telemetry first)
+
+---
+
+## Planned: Escalation notification adapters (Discord first)
+
+Close the notification gap in the escalation system. Agents escalate via Paperclip issues today, but humans only see them if they're watching the Paperclip UI. Notification adapters deliver escalations to where humans already are.
+
+### Why
+
+- Agents sit idle until a human notices the Paperclip issue
+- The escalate spec was designed for this: the tool creates the issue, and downstream notification is handled by Paperclip's plugin system or external adapters
+- Paperclip's community notification plugins are not available in eval — we build adapters ourselves
+- Discord is the first adapter; the same pattern supports Telegram, Slack, or a local TUI later
+
+### Architecture
+
+The escalate tool (Pi extension) creates a Paperclip issue and pauses the agent. That's where its responsibility ends. Notification delivery is a separate concern handled by adapter services. Paperclip is the bus — the issue system is the shared interface between the escalate tool and all notification adapters. Human responses flow back as Paperclip issue comments. Paperclip wakes the agent via `PAPERCLIP_WAKE_REASON` / `PAPERCLIP_WAKE_COMMENT_ID` env vars on the next heartbeat.
+
+### Blocked on
+
+- Discord server setup (operator task)
+- Validating escalation patterns with current two-agent setup first
+
+### Spec
+
+`tasks/specs/discord-bridge.md`
+
+---
+
+## Planned: Extension and agent hardening pass
+
+Define and enforce a standard for resilience, reliability, and robustness across all extensions, tools, skills, and agents. The goal is a repeatable quality bar — every component passes the same class of verification before it ships, and regressions are caught automatically.
+
+### Scope
+
+- Extensions (Pi extensions registered via bridge.mjs)
+- Agent-level behavior (task completion, escalation, checkpoint/resume)
+- Tools registered by extensions (individual tool contracts)
+- Skills and composed pipelines (multi-tool workflows like deep-research)
+- Inter-agent handoffs (artifact passing, wake/sleep, payload integrity)
+
+### What the standard covers
+
+- Transient failure handling (retry, backoff, circuit breaking)
+- Graceful degradation (partial results vs. hard failure)
+- Checkpoint and resume (interrupted work recoverable without data loss)
+- Input validation at system boundaries (malformed payloads, missing env vars, bad API responses)
+- Output contracts (structured, verifiable, no silent corruption)
+- Concurrency safety (resource exhaustion, thundering herd, deadlock)
+- Abort/cancellation propagation (AbortSignal honored end-to-end)
+- Idempotency where applicable (safe to re-run after crash)
+
+### How to test each component type
+
+The standard defines a tiered test methodology per component type — what must be verified, at what level, and what tooling supports it. This includes both the test patterns (fake servers, checkpoint manipulation, fault injection) and the pass/fail criteria for each tier.
+
+### Blocked on
+
+- Enough extensions and agents implemented to identify common failure patterns across component types
+- Deep-research integration tests (done) serve as the reference implementation for the testing methodology
+
+---
+
+## Planned: Cost tracking pipeline
+
+Bridge.mjs already captures Pi's full JSONL event stream including token usage from `message_end` events, but does not extract or aggregate it. Paperclip has a cost dashboard but the HTTP adapter doesn't feed it.
+
+### Phase 1 — Extract token usage in bridge
+
+Parse `message_end` events from Pi stdout for `usage` fields (prompt_tokens, completion_tokens, model). Aggregate per request. Include in /metrics endpoint and response JSON.
+
+### Phase 2 — Feed Paperclip cost dashboard
+
+When Paperclip exposes a cost/usage API endpoint, POST aggregated token counts per invocation. Map to agent ID, model, timestamp. Use `paperclip_api_request` escape hatch if no dedicated endpoint exists.
+
+### Phase 3 — OTel cost correlation
+
+pi-otel `pi.llm_request` spans already carry token counts and model info. If Langfuse is adopted (see below), cost tracking comes free via its model pricing database. Otherwise, extract from Aspire spans via a lightweight aggregation job.
+
+### Blocked on
+
+- Verifying Pi's JSONL event schema for token usage fields (quick spike)
+- Paperclip cost API availability (check upstream)
+
+---
+
+## Planned: Langfuse (LLM-native observability)
+
+Replace or augment Aspire Dashboard with Langfuse for LLM-specific analytics: per-model cost tracking, eval scores, prompt versioning, session threading, token usage dashboards.
+
+### Why
+
+Aspire shows raw OTel spans — good for debugging, bad for LLM analytics. Langfuse is purpose-built for agentic workflows and provides cost-per-run, evaluation pipelines, and prompt iteration history that a generic span viewer cannot.
+
+### What it looks like
+
+- 7-service compose stack: Langfuse web + worker, ClickHouse, Postgres, Redis, MinIO, OTel Collector
+- OTel Collector bridges pi-otel gRPC → Langfuse OTLP/HTTP endpoint
+- ~2-4GB RAM total
+- UI at :3000
+
+### When
+
+After eval stage validates the basic OTel pipeline (Aspire). Langfuse is the production upgrade path — same pi-otel export, different sink. No changes to logging.ts or bridge.mjs.
+
+### Blocked on
+
+- Completing OTel logging extension with Aspire (current work)
+- Enough eval runs to justify the infrastructure weight
+- MinIO deployment (Langfuse self-hosted uses MinIO anyway — shared dependency)
+
+---
+
 ## Future considerations
 
 - Artifact metadata index (what was produced, by whom, when)

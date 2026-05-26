@@ -574,3 +574,166 @@ Remediation across all 12 existing files plus 3 new modules (15 files total):
 
 - Module directory: `src/agents/extensions/deep-research/`
 - Tests: `tests/deep-research/`
+
+---
+
+## 2026-05-26 — Scrapling 0.4.8 API breaks: class renames, property changes, missing methods
+
+### What happened
+
+Implemented 4-tier web scraping using scrapling. Plan was based on scrapling's documented API (`Fetcher`, `PlayWrightFetcher`, `.text()`, `.css_first()`). All four broke against scrapling 0.4.8.
+
+### Changes in scrapling 0.4.8
+
+| Expected | Actual in 0.4.8 | Impact |
+|----------|-----------------|--------|
+| `PlayWrightFetcher` class | `DynamicFetcher` class | Import fails, class renamed |
+| `Fetcher.get(url)` | Still works but deprecated; `StealthyFetcher.fetch(url)` is preferred | Deprecation warning, functional |
+| `DynamicFetcher.get(url)` | `DynamicFetcher.fetch(url)` | Method renamed |
+| `element.text()` (method) | `element.text` (property, `TextHandler` type) | `TypeError: 'TextHandler' object is not callable` |
+| `element.css_first(sel)` | Does not exist on `Selector` | `AttributeError: 'Selector' object has no attribute 'css_first'` |
+| `from scrapling import PlayWrightFetcher` | `from scrapling import DynamicFetcher` | Old name not exported |
+| `fetcher.kill()` | Method does not exist on `DynamicFetcher` | Cleanup code fails |
+
+### Additional finding: pip install `scrapling` vs `scrapling[fetchers]`
+
+Bare `pip install scrapling` installs the package but NOT its fetcher dependencies (`curl_cffi`, `browserforge`, `playwright`, `patchright`). The `Fetcher` class exists but importing it triggers a chain of missing modules. `scrapling[fetchers]` is required for any actual scraping — this is not documented clearly.
+
+### Additional finding: `from scrapling import DynamicFetcher` succeeds without browser binaries
+
+`scrapling[fetchers]` installs the `playwright` and `patchright` pip packages but NOT the browser binaries. `from scrapling import DynamicFetcher` succeeds in containers without browsers — the import doesn't validate that binaries exist. `scrapling install` downloads the actual Chromium/Camoufox binaries. Detection must check for binaries, not just importability.
+
+### Solutions applied
+
+1. **Class rename**: `PlayWrightFetcher` → `DynamicFetcher` in scrape_browser.py
+2. **Method rename**: `.get()` → `.fetch()` for DynamicFetcher
+3. **Property access**: `el.text()` → `str(el.text)` in all Python scripts
+4. **Sub-selection**: `el.css_first(sel)` → `(el.css(sel) or [None])[0]`
+5. **Dep install**: `pip install scrapling` → `pip install "scrapling[fetchers]"` in researcher Dockerfile
+6. **Browser detection**: replaced import-based check with marker file (`/app/.browsers-installed`) created in data Dockerfile after `scrapling install`
+7. **Cleanup**: removed `fetcher.kill()` call (method doesn't exist)
+
+### Key takeaway
+
+Scrapling's API is unstable between minor versions. Pin the version in Dockerfiles and test against the exact version in CI. Do not rely on docs or README examples — always verify against the installed version inside the container.
+
+### References
+
+- Python scripts: `src/agents/{researcher,data}/scripts/scrape_stealth.py`, `src/agents/data/scripts/scrape_browser.py`
+- Extension: `src/agents/extensions/web-scrape.ts`
+- Dockerfiles: `src/agents/{researcher,data}/Dockerfile`
+
+---
+
+## 2026-05-26 — Pi extension packages dominate Docker image size
+
+### What happened
+
+CEO image (base, no Python, no scraping) is 1.5GB. Investigated layer breakdown.
+
+### Finding
+
+| Layer | Size | Command |
+|-------|------|---------|
+| node:22-slim base | ~500MB | FROM |
+| git | ~98MB | apt-get install git |
+| Pi CLI | 187MB | npm install -g @earendil-works/pi-coding-agent |
+| Pi extensions | **689MB** | pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents |
+
+`shitty-extensions` + `@ifi/pi-extension-subagents` = 689MB — nearly half the total image. CEO probably doesn't need subagent extensions since Paperclip handles orchestration. Need to audit which extensions each agent actually uses.
+
+### References
+
+- `docker history agents-ceo --format "{{.Size}}\t{{.CreatedBy}}"`
+- ROADMAP.md: "Planned: Docker image size optimization"
+
+---
+
+## 2026-05-26 — Cheerio global install not resolvable from /app in data container
+
+### What happened
+
+T1 (cheerio) scraping tier failed with `Cannot find module 'cheerio'` in the real-world scraping campaign. All 15 T1 tests returned 0 items with 0ms duration — immediate failure, not a site blocking issue.
+
+### Root cause
+
+The data Dockerfile installs cheerio globally (`npm install -g cheerio`), placing it at `/usr/local/lib/node_modules/cheerio`. The test runner (`real-world-tests.sh`) uses `docker compose exec data node -e "..."` to run inline Node scripts. Node's `require()` only resolves modules from `node_modules/` directories in the file's ancestry chain — it does not search the global prefix. Since the script runs from `/app` (WORKDIR), and `/app/node_modules/cheerio` does not exist, `require("cheerio")` fails.
+
+### What did not work
+
+1. `docker compose exec -e NODE_PATH=/usr/local/lib/node_modules` — the `-e` flag on `docker compose exec` did not propagate the env var to the Node process
+2. Setting NODE_PATH in the compose service environment — not appropriate since this is a test runner concern, not a runtime concern
+
+### Solution
+
+Use absolute path in the inline require: `require("/usr/local/lib/node_modules/cheerio")`. This is ugly but deterministic — the global install path is stable across node:22-slim images.
+
+### Better long-term fix
+
+Install cheerio locally in `/app` during the Dockerfile build: `cd /app && npm install cheerio`. Or add `NODE_PATH=/usr/local/lib/node_modules` as an ENV directive in the Dockerfile so all Node processes in the container can resolve global packages.
+
+### Key details
+
+- Only affects the test runner's inline Node scripts — the web-scrape.ts extension uses its own import path (loaded by Pi, which has its own module resolution)
+- The docker compose exec `-e` flag behavior may differ between Docker Compose v1 and v2
+- Fix applied in `tests/scraping/real-world-tests.sh` line 54
+
+---
+
+## 2026-05-26 — Real-world scraping campaign: 4-tier stack validation across 15 sites
+
+### Campaign summary
+
+Tested 15 websites spanning 4 difficulty levels against the 4-tier scraping stack (cheerio, scrapling Fetcher, scrapling DynamicFetcher, Apify). T4 (Apify) was not tested — APIFY_API_TOKEN not set.
+
+### Tier success rates
+
+| Tier | Attempted | PASS | BLOCK | EMPTY | Success Rate |
+|------|-----------|------|-------|-------|-------------|
+| T1 (cheerio) | 14 | 8 | 3 | 3 | 57% |
+| T2 (stealth) | 8 | 4 | 0 | 4 | 50% |
+| T3 (browser) | 11 | 8 | 0 | 3 | 73% |
+
+### Key finding 1: T2 (stealth) selector compatibility bug
+
+T2 returned EMPTY on multiple sites where T1 PASSED — Reddit, Amazon, Zillow. Scrapling's Fetcher gets the page successfully (no HTTP errors, no blocks) but CSS selector matching differs from cheerio. The HTML DOM tree that Scrapling returns may normalize differently (attribute ordering, whitespace handling, element structure) causing selectors that work in cheerio to miss in Scrapling's adapter. This is the most actionable bug found.
+
+### Key finding 2: anti-bot systems are less aggressive on single requests
+
+Amazon (AWS WAF), Zillow (PerimeterX), and Reddit (Cloudflare) all passed T1 on single requests from a datacenter IP. The anti-bot systems appear to be rate-based or behavioral — a single request with proper UA headers passes through. Volume testing needed to find actual thresholds.
+
+### Key finding 3: DataDome is the hardest anti-bot
+
+Etsy (DataDome) blocked all three local tiers. DataDome uses behavioral/intent analysis that detects Playwright automation despite scrapling's anti-detection measures. This is the only anti-bot system that completely defeated T3.
+
+### Key finding 4: T3 (browser) handles PerimeterX on some sites
+
+Booking.com (PerimeterX) and Zillow (PerimeterX) both passed T3. But Walmart (PerimeterX with "variable aggressiveness") returned EMPTY at T3. PerimeterX configuration varies by customer — not a binary pass/fail.
+
+### Key finding 5: JS-rendered sites need T3 minimum
+
+IMDb and Booking.com returned EMPTY at T1 and T2 but PASSED at T3. Content lives in client-side JavaScript that only renders in a browser environment.
+
+### Self-scrape beats Apify hypothesis results
+
+| Site | Hypothesis | Actual | Notes |
+|------|-----------|--------|-------|
+| eBay | Self-scrape wins | T1 BLOCK, T2 EMPTY | Needs Apify or T3 (not tested) |
+| Reddit | Self-scrape wins | T1 PASS | Confirmed — no Apify needed |
+| Yelp | Self-scrape wins | All tiers FAIL | Needs Apify or selector update |
+| Etsy | Self-scrape wins | DataDome blocks all | Needs Apify (if actor exists) |
+
+### Revised tier escalation model
+
+```
+T1 PASS → done (57% of sites)
+T1 BLOCK → T2 (defeats basic Cloudflare)
+T1 EMPTY → T3 (JS rendering needed, skip T2 — selector bug)
+T3 EMPTY/BLOCK → T4 Apify (DataDome, aggressive PerimeterX, SPAs)
+```
+
+### References
+
+- Campaign plan: `tasks/plans/real-world-scrape-campaign.md`
+- Test runner: `tests/scraping/real-world-tests.sh`
+- Results: `tests/results/real-world-campaign-20260526.md`

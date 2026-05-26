@@ -41,6 +41,7 @@ COPY data/scripts/ /app/scripts/
 
 RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents || true
 
+RUN touch /app/.browsers-installed
 RUN mkdir -p /workspace
 
 EXPOSE 8080

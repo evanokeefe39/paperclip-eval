@@ -46,14 +46,14 @@ def main():
                     if extract_fields:
                         item = {}
                         for field_name, field_selector in extract_fields.items():
-                            match = el.css_first(field_selector)
+                            match = (el.css(field_selector) or [None])[0]
                             if match:
-                                item[field_name] = match.text() or match.attrib.get("href", "") or match.attrib.get("src", "")
+                                item[field_name] = str(match.text) or match.attrib.get("href", "") or match.attrib.get("src", "")
                             else:
                                 item[field_name] = ""
                         items.append(item)
                     else:
-                        text = el.text()
+                        text = str(el.text)
                         if text:
                             items.append({"text": text})
 
@@ -62,7 +62,7 @@ def main():
 
                 # Pagination
                 if next_selector and page_num < max_pages - 1:
-                    next_link = response.css_first(next_selector)
+                    next_link = (response.css(next_selector) or [None])[0]
                     if next_link:
                         href = next_link.attrib.get("href", "")
                         if href:

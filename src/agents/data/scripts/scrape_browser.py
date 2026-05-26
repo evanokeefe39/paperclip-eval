@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Browser-rendered web scraper using Scrapling's PlayWrightFetcher."""
+"""Browser-rendered web scraper using Scrapling's DynamicFetcher (headless browser)."""
 
 import sys
 import json
@@ -27,8 +27,8 @@ def main():
     fetcher = None
 
     try:
-        from scrapling import PlayWrightFetcher
-        fetcher = PlayWrightFetcher(headless=True, disable_resources=True)
+        from scrapling import DynamicFetcher
+        fetcher = DynamicFetcher()
 
         for page_num in range(max_pages):
             if not current_url:
@@ -41,7 +41,7 @@ def main():
                 if wait_for:
                     fetch_kwargs["wait_selector"] = wait_for
 
-                response = fetcher.get(current_url, **fetch_kwargs)
+                response = fetcher.fetch(current_url, **fetch_kwargs)
                 pages_crawled += 1
 
                 elements = response.css(selector)
@@ -53,14 +53,14 @@ def main():
                     if extract_fields:
                         item = {}
                         for field_name, field_selector in extract_fields.items():
-                            match = el.css_first(field_selector)
+                            match = (el.css(field_selector) or [None])[0]
                             if match:
-                                item[field_name] = match.text() or match.attrib.get("href", "") or match.attrib.get("src", "")
+                                item[field_name] = str(match.text) or match.attrib.get("href", "") or match.attrib.get("src", "")
                             else:
                                 item[field_name] = ""
                         items.append(item)
                     else:
-                        text = el.text()
+                        text = str(el.text)
                         if text:
                             items.append({"text": text})
 
@@ -69,7 +69,7 @@ def main():
 
                 # Pagination
                 if next_selector and page_num < max_pages - 1:
-                    next_link = response.css_first(next_selector)
+                    next_link = (response.css(next_selector) or [None])[0]
                     if next_link:
                         href = next_link.attrib.get("href", "")
                         if href:
@@ -89,14 +89,6 @@ def main():
     except Exception as e:
         errors.append(f"Setup error: {str(e)}")
         print(f"Setup error: {e}", file=sys.stderr)
-
-    finally:
-        # Ensure browser processes are cleaned up
-        if fetcher is not None:
-            try:
-                fetcher.kill()
-            except Exception:
-                pass
 
     duration_ms = int((time.time() - start) * 1000)
 

@@ -54,12 +54,11 @@ export async function structuredCall<T>(
       });
 
       if (res.ok) {
-        const data = await res.json();
-        const parsed = JSON.parse(data.choices[0].message.content);
         try {
+          const data = await res.json();
+          const parsed = JSON.parse(data.choices[0].message.content);
           return validate(parsed);
-        } catch (validationErr) {
-          // Retry once on validation failure — the LLM may self-correct
+        } catch {
           continue;
         }
       }

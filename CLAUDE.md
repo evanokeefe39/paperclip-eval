@@ -1,5 +1,5 @@
 # CLAUDE.md
-
+Never use powershell
 ## What this is
 
 Evaluation repo for running Paperclip agent orchestration with Pi agents via Docker containers on Windows. Workaround for the pi_local adapter's CLI argument length limit (see LEARNING.md).
@@ -130,10 +130,10 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 
 ## Agent web scraping
 
-- 4-tier scraping: static (cheerio), stealth (Scrapling Fetcher), browser (Scrapling PlayWrightFetcher), cloud (Apify)
+- 4-tier scraping: static (cheerio), stealth (Scrapling Fetcher), browser (Scrapling DynamicFetcher), cloud (Apify)
 - Extension: `src/agents/extensions/web-scrape.ts` — conditionally registers tools based on available deps
 - Python workers: `scripts/scrape_stealth.py` (researcher + data), `scripts/scrape_browser.py` (data only)
-- Tool registration is conditional: cheerio → tier 1, Scrapling Fetcher → tier 2, PlayWrightFetcher → tier 3, Apify → always
+- Tool registration is conditional: cheerio → tier 1, Scrapling Fetcher → tier 2, marker file `/app/.browsers-installed` → tier 3, Apify → always
 - Researcher image: lightweight (Python + scrapling Fetcher + cheerio, ~600MB)
 - Data image: heavy (Python + scrapling[fetchers] + Chromium + Playwright, ~1.5GB, 2G memory limit)
 - Requires `APIFY_API_TOKEN` env var for tier 4 tools
