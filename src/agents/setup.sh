@@ -321,6 +321,42 @@ dc() {
   (cd "$REPO_ROOT" && docker compose -f "$COMPOSE_FILE" "$@")
 }
 
+fetch_skills() {
+  log cyan "Fetching Paperclip skills from GitHub..."
+  local skills_dir="${SCRIPT_DIR}/skills/paperclip-skills"
+  local github_raw="https://raw.githubusercontent.com/paperclipai/paperclip/master/skills"
+
+  local -a skill_files=(
+    "paperclip/SKILL.md"
+    "paperclip/references/api-reference.md"
+    "paperclip/references/company-skills.md"
+    "paperclip/references/issue-workspaces.md"
+    "paperclip/references/routines.md"
+    "paperclip/references/workflows.md"
+    "paperclip-converting-plans-to-tasks/SKILL.md"
+    "para-memory-files/SKILL.md"
+    "para-memory-files/references/schemas.md"
+  )
+
+  local failed=0
+  for file in "${skill_files[@]}"; do
+    local dest="${skills_dir}/${file}"
+    mkdir -p "$(dirname "$dest")"
+    if curl -sf --max-time 15 -o "$dest" "${github_raw}/${file}"; then
+      log green "  ${file}"
+    else
+      log red "  Failed: ${file}"
+      ((failed++)) || true
+    fi
+  done
+
+  if [[ $failed -gt 0 ]]; then
+    log red "  ${failed} file(s) failed to fetch (agents will work without them)"
+  else
+    log green "  All skills fetched."
+  fi
+}
+
 main() {
   check_deps
 
@@ -330,6 +366,7 @@ main() {
   declare -g COMPANY_EXISTING="false"
 
   copy_auth_json
+  fetch_skills
 
   log cyan "Starting services..."
   if [[ -n "$SKIP_BUILD" ]]; then

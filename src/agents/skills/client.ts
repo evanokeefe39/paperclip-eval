@@ -2,15 +2,20 @@ const PAPERCLIP_API_URL = process.env.PAPERCLIP_API_URL || "";
 const PAPERCLIP_API_KEY = process.env.PAPERCLIP_API_KEY || "";
 const PAPERCLIP_COMPANY_ID = process.env.PAPERCLIP_COMPANY_ID || "";
 const PAPERCLIP_AGENT_ID = process.env.PAPERCLIP_AGENT_ID || "";
+const PAPERCLIP_RUN_ID = process.env.PAPERCLIP_RUN_ID || "";
 
 export async function request(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
   if (!PAPERCLIP_API_KEY) throw new Error("PAPERCLIP_API_KEY not set");
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${PAPERCLIP_API_KEY}`,
+  };
+  if (PAPERCLIP_RUN_ID && method !== "GET") {
+    headers["X-Paperclip-Run-Id"] = PAPERCLIP_RUN_ID;
+  }
   const res = await fetch(`${PAPERCLIP_API_URL}/api${path}`, {
     method,
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${PAPERCLIP_API_KEY}`,
-    },
+    headers,
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     ...(signal ? { signal } : {}),
   });

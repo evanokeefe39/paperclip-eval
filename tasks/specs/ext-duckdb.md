@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned.
+Implemented (Phase 1).
 
 ## Intent
 

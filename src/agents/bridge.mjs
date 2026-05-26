@@ -52,6 +52,12 @@ async function reportCostEvent(usage) {
   }
 }
 
+// --- Paperclip skill discovery ---
+
+const SKILLS_DIR = "/app/skills/paperclip-skills";
+const PAPERCLIP_SKILLS = (process.env.PAPERCLIP_SKILLS || "paperclip,paperclip-converting-plans-to-tasks,para-memory-files")
+  .split(",").map(s => s.trim()).filter(Boolean);
+
 // --- 1.3 In-memory metrics counters ---
 
 const startTime = Date.now();
@@ -148,6 +154,17 @@ const server = http.createServer(async (req, res) => {
   const systemPrompt = body.systemPrompt || "";
   const prompt = body.prompt || body.renderedPrompt || "Continue your work.";
 
+  const wakeContext = {
+    reason: body.env?.PAPERCLIP_WAKE_REASON || "heartbeat",
+    taskId: body.env?.PAPERCLIP_TASK_ID || null,
+    commentId: body.env?.PAPERCLIP_WAKE_COMMENT_ID || null,
+    approvalId: body.env?.PAPERCLIP_APPROVAL_ID || null,
+    runId: body.env?.PAPERCLIP_RUN_ID || null,
+  };
+  log("info", "wake_context", wakeContext);
+
+  const skillArgs = PAPERCLIP_SKILLS.flatMap(name => ["--skill", `${SKILLS_DIR}/${name}`]);
+
   const spawnArgs = [
     "--mode", "rpc",
     "--no-session",
@@ -160,6 +177,8 @@ const server = http.createServer(async (req, res) => {
     "-e", "/app/skills/paperclip-tools.ts",
     "-e", "/app/extensions/artifacts.ts",
     "-e", "/app/extensions/logging.ts",
+    "-e", "/app/extensions/duckdb.ts",
+    ...skillArgs,
     ...(systemPrompt ? ["--append-system-prompt", systemPrompt] : []),
   ];
 

@@ -758,6 +758,19 @@ export default function (pi: ExtensionAPI) {
     },
   );
 
+  // ── Agent Invocation ───────────────────────────────────────────────
+
+  reg(
+    "paperclip_invoke_agent",
+    "Invoke Agent",
+    "Manually trigger a heartbeat invocation for an agent. Use after creating/assigning issues to ensure the agent wakes immediately instead of waiting for the next heartbeat cycle.",
+    Type.Object({
+      agentId: Type.String({ minLength: 1, description: "Agent UUID to invoke" }),
+    }),
+    async (_id, p) =>
+      ok(await request("POST", `/agents/${encodeURIComponent(p.agentId)}/heartbeat/invoke`, {})),
+  );
+
   // ── Escape Hatch ──────────────────────────────────────────────────
 
   reg(

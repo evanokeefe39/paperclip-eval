@@ -23,7 +23,8 @@ Agents are registered via the Paperclip API with adapter type `http`. The adapte
   },
   "runtimeConfig": {
     "heartbeat": {
-      "enabled": false,
+      "enabled": true,
+      "intervalMs": 120000,
       "wakeOnDemand": true
     }
   }
@@ -32,7 +33,7 @@ Agents are registered via the Paperclip API with adapter type `http`. The adapte
 
 API endpoint: `POST /api/companies/{companyId}/agent-hires`
 
-Heartbeat is disabled; agents are woken on demand. Paperclip still pings `/health` on registered agents to verify availability.
+Heartbeat runs every 120s for work discovery. `wakeOnDemand` supplements heartbeat with reactive wakes for lifecycle events (blockers resolved, children completed, comments, approvals). Note: initial issue assignment does NOT trigger a wake — agents discover new assignments via heartbeat polling or explicit invoke (`POST /api/agents/{id}/heartbeat/invoke`).
 
 ## Bootstrap Flow
 

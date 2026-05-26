@@ -39,3 +39,6 @@ spikes/
 
 # Aritfacts
 .artifacts
+
+# Paperclip skills (fetched from GitHub at setup time)
+src/agents/skills/paperclip-skills/

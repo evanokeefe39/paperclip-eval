@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 RUN pip3 install --break-system-packages "scrapling[fetchers]"
 RUN scrapling install
-RUN npm install -g cheerio
+RUN npm install -g cheerio @duckdb/node-api
 
 ENV NODE_PATH=/usr/local/lib/node_modules
 

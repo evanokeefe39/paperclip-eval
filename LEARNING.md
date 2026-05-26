@@ -4,6 +4,29 @@ Running notes on issues, workarounds, and architectural observations discovered 
 
 ---
 
+## 2026-05-26 — wakeOnDemand does not trigger on issue assignment
+
+### What happened
+CEO created child issues with `assigneeAgentId` set to worker agents. Workers never received POST /invoke. Multi-agent delegation was completely broken.
+
+### Root cause
+Paperclip uses a poll-plus-event hybrid model. Heartbeat polling is the primary work-intake mechanism. `wakeOnDemand` only fires for specific lifecycle events: `issue_blockers_resolved`, `issue_children_completed`, `issue_commented`, `issue_comment_mentioned`, `approval_resolved`. Initial issue assignment is NOT a wake trigger. With `heartbeat.enabled: false`, agents had no way to discover new work.
+
+### Systemic issues found
+1. `client.ts` was not sending `X-Paperclip-Run-Id` header on mutating API calls. SKILL.md requires this for all issue-modifying requests (run audit trail). Fixed: header now sent on all non-GET requests when `PAPERCLIP_RUN_ID` is set.
+2. No tool existed for CEO to explicitly invoke another agent. Fixed: added `paperclip_invoke_agent` tool wrapping `POST /api/agents/{id}/heartbeat/invoke`.
+
+### Fix
+1. Enabled heartbeat on all agents: `{ "enabled": true, "intervalMs": 120000, "wakeOnDemand": true }`. Heartbeat handles work discovery, wakeOnDemand handles reactive events.
+2. Added `X-Paperclip-Run-Id` header to `client.ts` for mutating requests.
+3. Added `paperclip_invoke_agent` tool so CEO can explicitly invoke delegated agents (belt-and-suspenders).
+4. Added wake context logging in `bridge.mjs` for observability.
+
+### Key takeaway
+`wakeOnDemand: true` with `heartbeat.enabled: false` means "wake on specific lifecycle events only." It does NOT mean "wake whenever there's work." Agents need heartbeat enabled to discover new assignments. Explicit invoke after delegation eliminates the 0-120s latency gap.
+
+---
+
 ## 2026-05-25 — pi_local adapter hits Windows command line length limit
 
 ### What happened

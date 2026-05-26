@@ -11,6 +11,6 @@
     "timeoutSec": 300
   },
   "runtimeConfig": {
-    "heartbeat": { "enabled": false, "wakeOnDemand": true }
+    "heartbeat": { "enabled": true, "intervalMs": 120000, "wakeOnDemand": true }
   }
 }

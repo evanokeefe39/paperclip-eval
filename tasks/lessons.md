@@ -4,6 +4,18 @@ Patterns and corrections from implementation cycles. Review before starting work
 
 ---
 
+## 2026-05-26: wakeOnDemand does not replace heartbeat for work discovery
+
+**What happened:** All agents had `heartbeat.enabled: false, wakeOnDemand: true`. CEO created child issues assigned to workers. Workers never woke up. Multi-agent orchestration dead on arrival.
+
+**Root cause:** `wakeOnDemand` only fires for specific lifecycle events (blockers_resolved, children_completed, comments, approvals). Issue assignment is NOT a wake event. Heartbeat polling is the primary work-intake mechanism in Paperclip's hybrid model.
+
+**Systemic:** Also found `client.ts` was missing the required `X-Paperclip-Run-Id` header on mutating API calls, and no tool existed for explicit agent invocation after delegation.
+
+**Rule:** Always enable heartbeat on agents that need to discover work. `wakeOnDemand` supplements heartbeat, it does not replace it. After delegating work to another agent, use `paperclip_invoke_agent` to eliminate the poll-interval latency gap.
+
+---
+
 ## 2026-05-26: Stale container images mask code changes
 
 **What happened:** Python fetch scripts were updated in the repo (fetch-only pattern) but the Docker container still had the old selector-based versions. Tests ran against stale code for an entire campaign, producing misleading TIMEOUT results.

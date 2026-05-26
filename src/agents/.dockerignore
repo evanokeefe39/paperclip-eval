@@ -7,3 +7,4 @@ bootstrap-invite.cjs
 paperclip-config.json
 *.md
 !templates/
+!skills/paperclip-skills/
