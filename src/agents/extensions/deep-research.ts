@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_CONFIG } from "./deep-research/config.js";
-import type { Config, } from "./deep-research/config.js";
+import type { Config } from "./deep-research/config.js";
 import type { Finding } from "./deep-research/types.js";
 import { deepResearchWithRetry } from "./deep-research/engine.js";
 import { queryIndex, getFullFinding } from "./deep-research/query.js";
@@ -19,7 +19,7 @@ export default function (pi: ExtensionAPI) {
       max_iterations: Type.Optional(Type.Number({ description: "Max research iterations (default 3)" })),
       max_sub_queries: Type.Optional(Type.Number({ description: "Max sub-queries per plan (default 6)" })),
     }),
-    async execute(_id, params, signal) {
+    async execute(_id: string, params: Record<string, any>, signal?: AbortSignal) {
       const config: Config = {
         ...DEFAULT_CONFIG,
         ...(params.max_iterations != null ? { max_iterations: params.max_iterations } : {}),
@@ -60,7 +60,7 @@ export default function (pi: ExtensionAPI) {
       session_id: Type.Optional(Type.String({ description: "Session to resume (auto-detects if omitted)" })),
       query: Type.Optional(Type.String({ description: "Original query (for auto-detection)" })),
     }),
-    async execute(_id, params, signal) {
+    async execute(_id: string, params: Record<string, any>, signal?: AbortSignal) {
       const config = DEFAULT_CONFIG;
       const result = await deepResearchWithRetry(params.query || "", config, signal);
       return {
@@ -85,8 +85,8 @@ export default function (pi: ExtensionAPI) {
       session_id: Type.Optional(Type.String({ description: "Limit to session" })),
       include_full: Type.Optional(Type.Boolean({ description: "Include full chunk text (default false)" })),
     }),
-    async execute(_id, params) {
-      const entries = queryIndex(
+    async execute(_id: string, params: Record<string, any>) {
+      const entries = await queryIndex(
         params.query,
         params.max_results || 20,
         DEFAULT_CONFIG,
@@ -110,7 +110,7 @@ export default function (pi: ExtensionAPI) {
         lines.push(`   Session: ${entry.session_id} (${entry.timestamp})`);
 
         if (params.include_full) {
-          const full = getFullFinding(entry.id, entry.session_id, DEFAULT_CONFIG);
+          const full = await getFullFinding(entry.id, entry.session_id, DEFAULT_CONFIG);
           if (full) lines.push(`   Quote: "${full.verbatim_quote}"`);
         }
         lines.push("");
@@ -140,9 +140,9 @@ export default function (pi: ExtensionAPI) {
         }))),
       })),
     }),
-    async execute(_id, params) {
+    async execute(_id: string, params: Record<string, any>) {
       const sessionId = params.session_id || `enrichment-${randomUUID()}`;
-      initSession(sessionId, "enrichment", DEFAULT_CONFIG);
+      await initSession(sessionId, "enrichment", DEFAULT_CONFIG);
 
       for (const raw of params.findings) {
         const finding: Finding = {
@@ -150,7 +150,9 @@ export default function (pi: ExtensionAPI) {
           session_id: sessionId,
           timestamp: new Date().toISOString(),
           claim: raw.claim,
-          claim_preview: raw.claim.length > 120 ? raw.claim.slice(0, 117) + "..." : raw.claim,
+          claim_preview: raw.claim.length > DEFAULT_CONFIG.claim_preview_length
+            ? raw.claim.slice(0, DEFAULT_CONFIG.claim_preview_length - 3) + "..."
+            : raw.claim,
           confidence: raw.confidence,
           source_url: raw.source_url,
           source_title: raw.source_title,
@@ -164,7 +166,7 @@ export default function (pi: ExtensionAPI) {
           related_findings: [],
           contradicts: [],
         };
-        streamFinding(finding, sessionId, DEFAULT_CONFIG);
+        await streamFinding(finding, sessionId, DEFAULT_CONFIG);
       }
 
       return {

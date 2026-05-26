@@ -25,7 +25,22 @@ src/agents/
     artifacts.ts            Shared artifact helpers
     logging.ts              Structured logging extension
     deep-research.ts        Multi-iteration research tool (uses deep-research/ subdir)
-    deep-research/          Engine, prompts, cache, types for deep research
+    deep-research/          Engine, prompts, cache, types, validators, concurrency for deep research
+      config.ts             Named constants (caps, concurrency limits, content thresholds)
+      types.ts              Shared TypeScript types
+      prompts.ts            LLM prompt templates
+      cache.ts              LRU cache for search results and page content
+      store.ts              Async filesystem store (findings, sources, metadata)
+      checkpoint.ts         Async checkpoint save/restore for resumable runs
+      query.ts              Async local findings index search
+      llm.ts                LLM calls with semaphore concurrency cap and validator callbacks
+      rank.ts               Snippet scoring and top-K selection
+      sweep.ts              Page fetch, chunk, extract pipeline (Promise.allSettled)
+      extract.ts            Finding extraction from page chunks with validators
+      engine.ts             Orchestrator: plan, search, rank, extract, reflect loop
+      semaphore.ts          Counting semaphore for bounding concurrent async work
+      validate.ts           Runtime validators for LLM structured output
+      utils.ts              Shared helpers (sleep, stripHtml)
   skills/                   Paperclip platform tools (Pi extensions wrapping Paperclip REST API)
     client.ts               Shared Paperclip API client — session-cookie auth with caching
     paperclip-tools.ts      Pi extension registering all 40 Paperclip MCP tools
@@ -51,6 +66,7 @@ scripts/wipe.sh              Wipe and reset Paperclip instance (bash/WSL)
 tests/                       Hurl, k6, and fixture-based test suite
   paperclip-tools/           Unit + integration tests for Paperclip tools extension
   escalate/                  Unit + integration tests for escalate extension
+  deep-research/             Unit tests for deep-research submodules (semaphore, validate, utils, config)
   e2e/                       End-to-end bash test suite
   hurl/                      HTTP contract tests
   k6/                        Load tests

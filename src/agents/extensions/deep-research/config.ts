@@ -17,6 +17,13 @@ export interface Config {
   max_findings_in_summary: number;
   artifacts_base: string;
   exa_api_key: string;
+  min_content_length: number;
+  snippet_cap_for_llm: number;
+  min_chunk_length: number;
+  key_claims_cap: number;
+  claim_preview_length: number;
+  max_concurrent_llm: number;
+  max_concurrent_fetch: number;
 }
 
 export const PROVIDERS: Record<string, { baseUrl: string; envKey: string }> = {
@@ -47,4 +54,11 @@ export const DEFAULT_CONFIG: Config = {
   max_findings_in_summary: 15,
   artifacts_base: "/artifacts/research",
   exa_api_key: process.env.EXA_API_KEY || "",
+  min_content_length: 200,
+  snippet_cap_for_llm: 40,
+  min_chunk_length: 100,
+  key_claims_cap: 7,
+  claim_preview_length: 120,
+  max_concurrent_llm: 10,
+  max_concurrent_fetch: 20,
 };

@@ -125,9 +125,9 @@ Publishing agent with HITL (human-in-the-loop) gating. Holds tools and credentia
 
 ### Extension Roadmap
 
-#### deep-research.ts (Researcher)
+#### deep-research.ts (Researcher) — DONE
 
-Wave-based iterative research adapted from agent-researcher (LangGraph → Pi extension).
+Wave-based iterative research adapted from agent-researcher (LangGraph → Pi extension). Implemented at `src/agents/extensions/deep-research.ts` with a 15-file submodule at `src/agents/extensions/deep-research/`. Remediated with async I/O, semaphore-based concurrency control, validated LLM output, and shared utilities. Tests at `tests/deep-research/`.
 
 **Architecture:**
 1. Plan: decompose query into 3-6 non-overlapping sub-queries
@@ -144,8 +144,11 @@ Wave-based iterative research adapted from agent-researcher (LangGraph → Pi ex
 - Never silently embed errors — fail loud, let retry layers handle
 - Conservative iteration: reflect prompt biases toward termination after 1-2 waves
 - Model stratification: cheap model for ranking volume, mid for extraction, smart for plan/reflect
+- Semaphore concurrency caps on LLM calls and page fetches (added in remediation)
+- Validator callbacks on all structured LLM output (added in remediation)
+- Async I/O throughout store, checkpoint, and query modules (added in remediation)
 
-**Config knobs:** max_iterations (3), max_sub_queries (6), snippet_results_per_query (10), top_k_urls_after_rank (5)
+**Config knobs:** max_iterations (3), max_sub_queries (6), snippet_results_per_query (10), top_k_urls_after_rank (5), max_concurrent_llm, max_concurrent_fetch, min_content_length, snippet_cap_for_llm, min_chunk_length, key_claims_cap, claim_preview_length
 
 #### web-scraping.ts (Data agent)
 
@@ -197,7 +200,7 @@ Implement TPS principles across the pipeline. Phased — each phase solves probl
 
 - Stub all agent directories (agent.json, .pi/agent/ configs, AGENTS.md)
 - Implement Coder container security (non-root, resource limits, network policy)
-- Build deep-research.ts extension for Researcher
+- ~~Build deep-research.ts extension for Researcher~~ (done — 15-file submodule, remediated)
 - Build web-scraping.ts extension for Data agent
 - Build org-data-query.ts extension for Researcher and Writer
 - Issue templates: research brief, QA review, publish brief (poka-yoke layer)

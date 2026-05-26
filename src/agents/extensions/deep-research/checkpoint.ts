@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { writeFile, rename } from "node:fs/promises";
 import type { SubQuery, SubQuerySummary, ReflectDecision } from "./types.js";
 
 const CHECKPOINT_PATH = "/workspace/.research-checkpoint.json";
@@ -39,10 +40,10 @@ export class Checkpoint {
     }
   }
 
-  private save(): void {
+  private async save(): Promise<void> {
     const tmp = CHECKPOINT_PATH + ".tmp";
-    writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-    renameSync(tmp, CHECKPOINT_PATH);
+    await writeFile(tmp, JSON.stringify(this.data, null, 2));
+    await rename(tmp, CHECKPOINT_PATH);
   }
 
   findResumable(query: string): SessionCheckpoint | null {
@@ -52,7 +53,7 @@ export class Checkpoint {
     return sessions[0] || null;
   }
 
-  createSession(sessionId: string, query: string): void {
+  async createSession(sessionId: string, query: string): Promise<void> {
     this.data.sessions[sessionId] = {
       session_id: sessionId,
       query,
@@ -63,10 +64,10 @@ export class Checkpoint {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
-    this.save();
+    await this.save();
   }
 
-  addSubQueries(sessionId: string, subQueries: SubQuery[], iteration: number): void {
+  async addSubQueries(sessionId: string, subQueries: SubQuery[], iteration: number): Promise<void> {
     const session = this.data.sessions[sessionId];
     if (!session) return;
     for (const sq of subQueries) {
@@ -80,63 +81,63 @@ export class Checkpoint {
       });
     }
     session.updated_at = new Date().toISOString();
-    this.save();
+    await this.save();
   }
 
-  markSweepStarted(subQueryId: string, sessionId: string): void {
+  async markSweepStarted(subQueryId: string, sessionId: string): Promise<void> {
     const sq = this.data.sessions[sessionId]?.sub_queries.find(s => s.id === subQueryId);
     if (sq) {
       sq.status = "running";
       this.data.sessions[sessionId].updated_at = new Date().toISOString();
-      this.save();
+      await this.save();
     }
   }
 
-  markSweepComplete(subQueryId: string, sessionId: string, summary: SubQuerySummary): void {
+  async markSweepComplete(subQueryId: string, sessionId: string, summary: SubQuerySummary): Promise<void> {
     const sq = this.data.sessions[sessionId]?.sub_queries.find(s => s.id === subQueryId);
     if (sq) {
       sq.status = "complete";
       sq.summary = summary;
       this.data.sessions[sessionId].updated_at = new Date().toISOString();
-      this.save();
+      await this.save();
     }
   }
 
-  markSweepFailed(subQueryId: string, sessionId: string, error: string): void {
+  async markSweepFailed(subQueryId: string, sessionId: string, error: string): Promise<void> {
     const sq = this.data.sessions[sessionId]?.sub_queries.find(s => s.id === subQueryId);
     if (sq) {
       sq.status = "failed";
       sq.error = error;
       this.data.sessions[sessionId].updated_at = new Date().toISOString();
-      this.save();
+      await this.save();
     }
   }
 
-  addReflection(sessionId: string, iteration: number, decision: ReflectDecision): void {
+  async addReflection(sessionId: string, iteration: number, decision: ReflectDecision): Promise<void> {
     const session = this.data.sessions[sessionId];
     if (!session) return;
     session.reflections.push(decision);
     session.iteration = iteration;
     session.status = "reflecting";
     session.updated_at = new Date().toISOString();
-    this.save();
+    await this.save();
   }
 
-  markComplete(sessionId: string): void {
+  async markComplete(sessionId: string): Promise<void> {
     const session = this.data.sessions[sessionId];
     if (session) {
       session.status = "complete";
       session.updated_at = new Date().toISOString();
-      this.save();
+      await this.save();
     }
   }
 
-  cleanup(): void {
+  async cleanup(): Promise<void> {
     const entries = Object.entries(this.data.sessions)
       .sort(([, a], [, b]) => b.updated_at.localeCompare(a.updated_at));
     if (entries.length > 20) {
       this.data.sessions = Object.fromEntries(entries.slice(0, 20));
-      this.save();
+      await this.save();
     }
   }
 }

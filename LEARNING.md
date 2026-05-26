@@ -536,3 +536,41 @@ The extension is loaded via `-e /app/skills/paperclip-tools.ts` in bridge.mjs sp
 - Upstream client: `packages/mcp-server/src/client.ts`
 - Local extension: `src/agents/skills/paperclip-tools.ts`
 - Tests: `tests/paperclip-tools/unit-test.mjs` (162 tests), `tests/paperclip-tools/integration-test.sh`
+
+---
+
+## 2026-05-26 — Deep-research extension remediation: async I/O, concurrency, validation
+
+### What happened
+
+The deep-research extension (`src/agents/extensions/deep-research/`) had accumulated several code quality issues during initial development: synchronous filesystem calls blocking the event loop, unbounded concurrent LLM and fetch calls, unchecked `as T` casts on LLM structured output, duplicated utility functions across modules, and magic numbers scattered throughout.
+
+### What was done
+
+Remediation across all 12 existing files plus 3 new modules (15 files total):
+
+1. **semaphore.ts** (new) — counting semaphore for bounding concurrent async work. Used by `llm.ts` (LLM call concurrency) and `sweep.ts` (page fetch concurrency). Limits configured as named constants in `config.ts` (`max_concurrent_llm`, `max_concurrent_fetch`).
+
+2. **validate.ts** (new) — runtime validator functions for LLM structured output. Each validator checks the shape and required fields of a parsed response, replacing bare `as T` casts that silently passed malformed data. Used by `llm.ts` `structuredCall`, `extract.ts`, and `engine.ts`.
+
+3. **utils.ts** (new) — shared `sleep` and `stripHtml` helpers. Eliminates three duplicate `sleep` implementations (previously inline in llm.ts, engine.ts, sweep.ts) and two duplicate HTML-stripping functions (sweep.ts, extract.ts).
+
+4. **config.ts** — 7 new named constants added: `min_content_length`, `snippet_cap_for_llm`, `min_chunk_length`, `key_claims_cap`, `claim_preview_length`, `max_concurrent_llm`, `max_concurrent_fetch`. All former magic numbers now reference these.
+
+5. **Async I/O migration** — `store.ts`, `checkpoint.ts`, `query.ts` converted from `fs.readFileSync`/`writeFileSync` to `fs/promises` (`readFile`/`writeFile`). Callers in `engine.ts`, `extract.ts`, `deep-research.ts` updated to `await` all store and checkpoint calls. Exceptions: `existsSync` guards and `readFileSync` in the checkpoint constructor (synchronous by design for initial load).
+
+6. **sweep.ts** — `fetchPages` now returns `failedUrls` alongside results. Page extraction uses `Promise.allSettled` instead of `Promise.all` so a single page failure does not abort the entire sweep. Uses `stripHtml` from utils instead of inline implementation.
+
+7. **llm.ts** — `structuredCall` signature changed to accept a `validate` callback parameter. All LLM calls wrapped by the semaphore. Imports shared `sleep` from utils.
+
+### Key patterns
+
+- **Semaphore for concurrency**: wrap async work in `semaphore.acquire()` / `release()` rather than unbounded `Promise.all`. Prevents API rate limit hits and memory pressure from parallel LLM calls.
+- **Validator callbacks over as-casts**: `structuredCall<T>(prompt, schema, validate)` where `validate: (raw: unknown) => T` throws on malformed input. Catches LLM output issues at the call boundary, not downstream.
+- **Shared utils to eliminate duplication**: when three modules implement the same helper, extract it. Reduces bug surface and keeps behavior consistent.
+- **Async I/O by default**: filesystem calls in an async pipeline should use `fs/promises`. Sync variants are acceptable only in constructors or one-time initialization.
+
+### References
+
+- Module directory: `src/agents/extensions/deep-research/`
+- Tests: `tests/deep-research/`

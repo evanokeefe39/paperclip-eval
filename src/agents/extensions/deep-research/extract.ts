@@ -1,26 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { Finding, SubQuery, RankedSnippet, LLMConfig } from "./types.js";
+import type { Finding, SubQuery, RankedSnippet } from "./types.js";
 import type { Config } from "./config.js";
 import { structuredCall, buildLLMConfig } from "./llm.js";
 import { SELECT_PROMPT, EXTRACT_PROMPT } from "./prompts.js";
 import { streamFinding, storePage } from "./store.js";
-
-interface SelectResponse {
-  selected_urls: string[];
-  reason: string;
-}
-
-interface ExtractedFinding {
-  claim: string;
-  verbatim_quote: string;
-  confidence: number;
-  topic_tags: string[];
-  entities: { name: string; type: string }[];
-}
-
-interface ExtractResponse {
-  findings: ExtractedFinding[];
-}
+import { validateSelectResponse, validateExtractResponse } from "./validate.js";
 
 export async function selectUrls(
   subQueryText: string,
@@ -31,20 +15,22 @@ export async function selectUrls(
   const llmConfig = buildLLMConfig(config);
 
   const formatted = survivors
-    .slice(0, 40)
+    .slice(0, config.snippet_cap_for_llm)
     .map(
       (s, i) =>
-        `${i + 1}. [${s.combined_score.toFixed(2)}] ${s.title}\n   URL: ${s.url}\n   ${(s.text || "").slice(0, 200)}`,
+        `${i + 1}. [${s.combined_score.toFixed(2)}] ${s.title}\n   URL: ${s.url}\n   ${(s.text || "").slice(0, config.min_content_length)}`,
     )
     .join("\n\n");
 
   const userContent = `Sub-query: ${subQueryText}\n\nRanked snippets:\n${formatted}`;
 
   try {
-    const result = await structuredCall<SelectResponse>(
+    const result = await structuredCall<{ selected_urls: string[] }>(
       llmConfig,
       SELECT_PROMPT,
       userContent,
+      validateSelectResponse,
+      config,
       signal,
     );
     return result.selected_urls || [];
@@ -67,10 +53,10 @@ export async function extractFromPage(
   const allFindings: Finding[] = [];
 
   const fullContent = chunks.join("\n\n---\n\n");
-  const snapshotPath = storePage(sessionId, url, fullContent, config);
+  const snapshotPath = await storePage(sessionId, url, fullContent, config);
 
   for (const chunk of chunks) {
-    if (chunk.trim().length < 100) continue;
+    if (chunk.trim().length < config.min_chunk_length) continue;
 
     const userContent = [
       `Sub-query: ${subQuery.query}`,
@@ -81,35 +67,38 @@ export async function extractFromPage(
     ].join("\n");
 
     try {
-      const result = await structuredCall<ExtractResponse>(
+      const result = await structuredCall(
         llmConfig,
         EXTRACT_PROMPT,
         userContent,
+        validateExtractResponse,
+        config,
         signal,
       );
 
       for (const raw of result.findings || []) {
         if (!raw.claim || raw.claim.length < 10) continue;
 
+        const rawAny = raw as Record<string, unknown>;
         const finding: Finding = {
           id: randomUUID(),
           session_id: sessionId,
           timestamp: new Date().toISOString(),
           claim: raw.claim,
           claim_preview:
-            raw.claim.length > 120
-              ? raw.claim.slice(0, 117) + "..."
+            raw.claim.length > config.claim_preview_length
+              ? raw.claim.slice(0, config.claim_preview_length - 3) + "..."
               : raw.claim,
           confidence: Math.max(0, Math.min(1, raw.confidence || 0.5)),
           source_url: url,
           source_title: title,
-          verbatim_quote: raw.verbatim_quote || "",
+          verbatim_quote: (rawAny.verbatim_quote as string) || "",
           full_chunk: chunk,
           page_snapshot_path: snapshotPath,
           sub_query: subQuery.query,
           sub_query_id: subQuery.id,
           topic_tags: raw.topic_tags || [],
-          entities: (raw.entities || []).map((e) => ({
+          entities: ((rawAny.entities as Array<{ name: string; type: string }>) || []).map((e) => ({
             name: e.name,
             type: e.type,
           })),
@@ -118,7 +107,7 @@ export async function extractFromPage(
         };
 
         allFindings.push(finding);
-        streamFinding(finding, sessionId, config);
+        await streamFinding(finding, sessionId, config);
       }
     } catch {
       continue;

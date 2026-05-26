@@ -11,6 +11,7 @@ import type { Config } from "./config.js";
 import { heuristicRank } from "./rank.js";
 import { selectUrls, extractFromPage } from "./extract.js";
 import { LRUCache } from "./cache.js";
+import { stripHtml } from "./utils.js";
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -59,6 +60,7 @@ export async function searchExa(
 
 async function fetchPage(
   url: string,
+  config: Config,
   signal?: AbortSignal,
 ): Promise<FetchedPage | null> {
   try {
@@ -76,7 +78,7 @@ async function fetchPage(
     if (!res.ok) return null;
 
     const text = await res.text();
-    if (text.length < 200) return null;
+    if (text.length < config.min_content_length) return null;
 
     const contentType = res.headers.get("content-type") || "";
     const isHTML = contentType.includes("text/html") || contentType.includes("application/xhtml");
@@ -86,29 +88,12 @@ async function fetchPage(
       return { url, title: titleMatch?.[1]?.trim() || url, content: text };
     }
 
-    const titleMatch = text.match(/<title[^>]*>([^<]+)<\/title>/i);
-    const title = titleMatch?.[1]?.trim() || "";
+    const { title } = stripHtml(text);
     const bodyMatch = text.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-    const body = bodyMatch?.[1] || text;
+    const { content: cleaned } = stripHtml(bodyMatch?.[1] || text);
 
-    const cleaned = body
-      .replace(/<script[\s\S]*?<\/script>/gi, "")
-      .replace(/<style[\s\S]*?<\/style>/gi, "")
-      .replace(/<nav[\s\S]*?<\/nav>/gi, "")
-      .replace(/<footer[\s\S]*?<\/footer>/gi, "")
-      .replace(/<header[\s\S]*?<\/header>/gi, "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/g, " ")
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    if (cleaned.length < 200) return null;
-    return { url, title, content: cleaned };
+    if (cleaned.length < config.min_content_length) return null;
+    return { url, title: title || url, content: cleaned };
   } catch {
     return null;
   }
@@ -116,10 +101,11 @@ async function fetchPage(
 
 async function fetchWithJinaFallback(
   url: string,
+  config: Config,
   signal?: AbortSignal,
 ): Promise<FetchedPage | null> {
-  const direct = await fetchPage(url, signal);
-  if (direct && direct.content.length >= 200) return direct;
+  const direct = await fetchPage(url, config, signal);
+  if (direct && direct.content.length >= config.min_content_length) return direct;
 
   try {
     const res = await fetch(JINA_READER_BASE + url, {
@@ -136,7 +122,7 @@ async function fetchWithJinaFallback(
     if (contentStart < 0) return direct;
 
     const markdown = text.slice(contentStart + 17).trim();
-    if (markdown.length < 200) return direct;
+    if (markdown.length < config.min_content_length) return direct;
 
     const titleMatch = markdown.match(/^#{1,2}\s+(.+)/m);
     return {
@@ -152,9 +138,11 @@ async function fetchWithJinaFallback(
 async function fetchPages(
   urls: string[],
   fetchCache: Map<string, { title: string; content: string }>,
+  config: Config,
   signal?: AbortSignal,
-): Promise<FetchedPage[]> {
+): Promise<{ pages: FetchedPage[]; failedUrls: string[] }> {
   const results: FetchedPage[] = [];
+  const failedUrls: string[] = [];
 
   const toFetch = urls.filter(url => {
     const cached = fetchCache.get(url);
@@ -166,18 +154,21 @@ async function fetchPages(
   });
 
   const fetched = await Promise.allSettled(
-    toFetch.map(url => fetchWithJinaFallback(url, signal))
+    toFetch.map(url => fetchWithJinaFallback(url, config, signal))
   );
 
-  for (const result of fetched) {
+  for (let i = 0; i < fetched.length; i++) {
+    const result = fetched[i];
     if (result.status === "fulfilled" && result.value) {
       const page = result.value;
       fetchCache.set(page.url, { title: page.title, content: page.content });
       results.push(page);
+    } else {
+      failedUrls.push(toFetch[i]);
     }
   }
 
-  return results;
+  return { pages: results, failedUrls };
 }
 
 export function chunkText(text: string, size: number, overlap: number): string[] {
@@ -228,7 +219,7 @@ export async function executeSweep(
 
   const selectedUrls = await selectUrls(subQuery.query, survivors, config, signal);
 
-  const pages = await fetchPages(selectedUrls, state.fetchCache, signal);
+  const { pages, failedUrls } = await fetchPages(selectedUrls, state.fetchCache, config, signal);
 
   const pageChunks = pages.map(p => ({
     url: p.url,
@@ -237,13 +228,15 @@ export async function executeSweep(
       .slice(0, config.max_chunks_per_page),
   }));
 
-  const allFindings: Finding[] = [];
-  await Promise.all(
-    pageChunks.map(async ({ url, title, chunks }) => {
-      const findings = await extractFromPage(url, title, chunks, subQuery, sessionId, config, signal);
-      allFindings.push(...findings);
-    })
+  const extractResults = await Promise.allSettled(
+    pageChunks.map(({ url, title, chunks }) =>
+      extractFromPage(url, title, chunks, subQuery, sessionId, config, signal)
+    )
   );
+  const allFindings: Finding[] = [];
+  for (const result of extractResults) {
+    if (result.status === "fulfilled") allFindings.push(...result.value);
+  }
 
   const deduplicated = deduplicateFindings(allFindings);
   const capped = deduplicated
@@ -253,9 +246,9 @@ export async function executeSweep(
   const summary: SubQuerySummary = {
     sub_query_id: subQuery.id,
     query: subQuery.query,
-    key_claims: capped.slice(0, 7).map(f => f.claim_preview),
+    key_claims: capped.slice(0, config.key_claims_cap).map(f => f.claim_preview),
     coverage: `${capped.length} findings from ${selectedUrls.length} sources (${snippets.length} scanned).`,
-    gaps: [],
+    gaps: failedUrls.length > 0 ? [`${failedUrls.length} URLs failed to fetch`] : [],
     finding_count: capped.length,
     source_count: selectedUrls.length,
   };

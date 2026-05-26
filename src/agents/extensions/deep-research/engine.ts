@@ -12,14 +12,8 @@ import { initSession, writeSessionMeta, buildSessionSummary } from "./store.js";
 import { Checkpoint } from "./checkpoint.js";
 import { executeSweep } from "./sweep.js";
 import { LRUCache } from "./cache.js";
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-interface PlanResponse {
-  sub_queries: { query: string; rationale: string }[];
-}
+import { sleep } from "./utils.js";
+import { validatePlanResponse, validateReflectDecision } from "./validate.js";
 
 async function planSubQueries(
   query: string,
@@ -27,10 +21,12 @@ async function planSubQueries(
   signal?: AbortSignal,
 ): Promise<SubQuery[]> {
   const llmConfig = buildLLMConfig(config);
-  const result = await structuredCall<PlanResponse>(
+  const result = await structuredCall(
     llmConfig,
     PLAN_PROMPT,
     query,
+    validatePlanResponse,
+    config,
     signal,
   );
 
@@ -59,10 +55,12 @@ async function reflect(
     ...summaries.map((s, i) => `${i + 1}. ${s}`),
   ].join("\n");
 
-  const result = await structuredCall<ReflectDecision>(
+  const result = await structuredCall(
     llmConfig,
     REFLECT_PROMPT,
     userContent,
+    validateReflectDecision,
+    config,
     signal,
   );
 
@@ -74,7 +72,7 @@ async function reflect(
 
   return {
     continue: result.continue ?? false,
-    reason: result.reason || "",
+    reason: "",
     new_sub_queries: newSubQueries,
   };
 }
@@ -110,11 +108,11 @@ async function deepResearch(
     state.startedAt = existing.created_at;
   } else {
     sessionId = randomUUID();
-    checkpoint.createSession(sessionId, query);
-    initSession(sessionId, query, config);
+    await checkpoint.createSession(sessionId, query);
+    await initSession(sessionId, query, config);
 
     allSubQueries = await planSubQueries(query, config, signal);
-    checkpoint.addSubQueries(sessionId, allSubQueries, 0);
+    await checkpoint.addSubQueries(sessionId, allSubQueries, 0);
     startIteration = 0;
   }
 
@@ -128,13 +126,13 @@ async function deepResearch(
   while (iteration < config.max_iterations && pending.length > 0) {
     const results = await Promise.allSettled(
       pending.map(async sq => {
-        checkpoint.markSweepStarted(sq.id, sessionId);
+        await checkpoint.markSweepStarted(sq.id, sessionId);
         try {
           const result = await executeSweep(sq, query, sessionId, config, state, signal);
-          checkpoint.markSweepComplete(sq.id, sessionId, result.summary);
+          await checkpoint.markSweepComplete(sq.id, sessionId, result.summary);
           return result;
         } catch (err) {
-          checkpoint.markSweepFailed(sq.id, sessionId, err instanceof Error ? err.message : String(err));
+          await checkpoint.markSweepFailed(sq.id, sessionId, err instanceof Error ? err.message : String(err));
           throw err;
         }
       })
@@ -149,21 +147,21 @@ async function deepResearch(
 
     const summaries = [...state.sweepResults.values()].map(r => r.summary.coverage);
     const decision = await reflect(query, summaries, iteration, config, signal);
-    checkpoint.addReflection(sessionId, iteration, decision);
+    await checkpoint.addReflection(sessionId, iteration, decision);
 
     if (!decision.continue || decision.new_sub_queries.length === 0) break;
 
-    checkpoint.addSubQueries(sessionId, decision.new_sub_queries, iteration + 1);
+    await checkpoint.addSubQueries(sessionId, decision.new_sub_queries, iteration + 1);
     pending = decision.new_sub_queries;
     iteration++;
     state.iteration = iteration;
   }
 
-  checkpoint.markComplete(sessionId);
-  checkpoint.cleanup();
+  await checkpoint.markComplete(sessionId);
+  await checkpoint.cleanup();
 
-  const summary = buildSessionSummary(query, state, sessionId, config);
-  writeSessionMeta(sessionId, query, allSubQueries, config, state);
+  const summary = await buildSessionSummary(query, state, sessionId, config);
+  await writeSessionMeta(sessionId, query, allSubQueries, config, state);
 
   return { sessionId, summary, findingCount: state.allFindings.length };
 }

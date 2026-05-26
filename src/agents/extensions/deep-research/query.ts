@@ -1,13 +1,14 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import type { IndexEntry, Finding } from "./types.js";
 import type { Config } from "./config.js";
 
-export function queryIndex(
+export async function queryIndex(
   query: string,
   maxResults: number,
   config: Config,
   sessionFilter?: string
-): IndexEntry[] {
+): Promise<IndexEntry[]> {
   const indexPath = `${config.artifacts_base}/index.jsonl`;
   if (!existsSync(indexPath)) return [];
 
@@ -16,7 +17,7 @@ export function queryIndex(
 
   const results: { entry: IndexEntry; score: number }[] = [];
 
-  const lines = readFileSync(indexPath, "utf-8").split("\n").filter(Boolean);
+  const lines = (await readFile(indexPath, "utf-8")).split("\n").filter(Boolean);
   for (const line of lines) {
     const entry: IndexEntry = JSON.parse(line);
     if (sessionFilter && entry.session_id !== sessionFilter) continue;
@@ -41,11 +42,11 @@ export function queryIndex(
     .map(r => r.entry);
 }
 
-export function getFullFinding(findingId: string, sessionId: string, config: Config): Finding | null {
+export async function getFullFinding(findingId: string, sessionId: string, config: Config): Promise<Finding | null> {
   const path = `${config.artifacts_base}/sessions/${sessionId}/findings.jsonl`;
   if (!existsSync(path)) return null;
 
-  const lines = readFileSync(path, "utf-8").split("\n").filter(Boolean);
+  const lines = (await readFile(path, "utf-8")).split("\n").filter(Boolean);
   for (const line of lines) {
     const f: Finding = JSON.parse(line);
     if (f.id === findingId) return f;

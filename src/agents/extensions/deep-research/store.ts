@@ -1,17 +1,18 @@
-import { existsSync, mkdirSync, appendFileSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { mkdir, appendFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import type { Finding, IndexEntry, SessionMeta, SubQuery, EngineState } from "./types.js";
 import type { Config } from "./config.js";
 
-export function initSession(sessionId: string, query: string, config: Config): void {
+export async function initSession(sessionId: string, query: string, config: Config): Promise<void> {
   const base = `${config.artifacts_base}/sessions/${sessionId}`;
-  mkdirSync(`${base}/pages`, { recursive: true });
+  await mkdir(`${base}/pages`, { recursive: true });
 }
 
-export function streamFinding(finding: Finding, sessionId: string, config: Config): void {
+export async function streamFinding(finding: Finding, sessionId: string, config: Config): Promise<void> {
   const base = `${config.artifacts_base}/sessions/${sessionId}`;
 
-  appendFileSync(
+  await appendFile(
     `${base}/findings.jsonl`,
     JSON.stringify(finding) + "\n"
   );
@@ -26,28 +27,28 @@ export function streamFinding(finding: Finding, sessionId: string, config: Confi
     topic_tags: finding.topic_tags,
     entities: finding.entities,
   };
-  appendFileSync(
+  await appendFile(
     `${config.artifacts_base}/index.jsonl`,
     JSON.stringify(indexEntry) + "\n"
   );
 }
 
-export function storePage(sessionId: string, url: string, content: string, config: Config): string {
+export async function storePage(sessionId: string, url: string, content: string, config: Config): Promise<string> {
   const hash = createHash("sha256").update(url).digest("hex").slice(0, 16);
   const path = `${config.artifacts_base}/sessions/${sessionId}/pages/${hash}.md`;
   if (!existsSync(path)) {
-    writeFileSync(path, `<!-- Source: ${url} -->\n<!-- Captured: ${new Date().toISOString()} -->\n\n${content}`);
+    await writeFile(path, `<!-- Source: ${url} -->\n<!-- Captured: ${new Date().toISOString()} -->\n\n${content}`);
   }
   return path;
 }
 
-export function writeSessionMeta(
+export async function writeSessionMeta(
   sessionId: string,
   query: string,
   subQueries: SubQuery[],
   config: Config,
   state: EngineState
-): void {
+): Promise<void> {
   const meta: SessionMeta = {
     session_id: sessionId,
     query,
@@ -59,18 +60,18 @@ export function writeSessionMeta(
     iterations: state.iteration,
     config: { max_iterations: config.max_iterations, max_sub_queries: config.max_sub_queries },
   };
-  writeFileSync(
+  await writeFile(
     `${config.artifacts_base}/sessions/${sessionId}/meta.json`,
     JSON.stringify(meta, null, 2)
   );
 }
 
-export function buildSessionSummary(
+export async function buildSessionSummary(
   query: string,
   state: EngineState,
   sessionId: string,
   config: Config
-): string {
+): Promise<string> {
   const findings = state.allFindings
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 15);
@@ -109,7 +110,7 @@ export function buildSessionSummary(
 
   const base = `${config.artifacts_base}/sessions/${sessionId}`;
   try {
-    writeFileSync(`${base}/summary.md`, summary);
+    await writeFile(`${base}/summary.md`, summary);
   } catch {
     // Non-critical -- summary is returned to agent regardless
   }

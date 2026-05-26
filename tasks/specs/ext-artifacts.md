@@ -1,4 +1,4 @@
-# Extension: artifacts
+# Extension: artifacts (v1)
 
 ## Status
 
@@ -6,206 +6,253 @@ Stub. Empty file at src/agents/extensions/artifacts.ts.
 
 ## Intent
 
-Shared artifact storage interface for inter-agent data exchange, workspace initialization, template enforcement, and learnings lifecycle management. Wraps the shared Docker volume (/artifacts) with structured read/write operations, path conventions, metadata, and discovery. The single integration point for all shared resources — agents interact with the artifact layer, never with raw filesystem paths.
+Shared artifact storage for inter-agent data exchange. Agents write structured output, read each other's artifacts by path, and never inline large documents in orchestration messages. Works with or without Paperclip — Paperclip metadata enriches artifacts when available but is never required.
 
-Future: migrate from Docker volume to MinIO (S3-compatible) when infrastructure is ready (see ROADMAP.md). The tool interface stays the same; the backend changes.
+V1 scope: write, read, list, workspace init, template access, pass-by-reference prompt injection. No learnings management, no agent profiles, no git sync, no MinIO.
+
+## Principles
+
+1. **Pass by reference** — agents exchange artifact paths, never content. The extension injects this rule via `promptSnippet`.
+2. **Rich metadata when available** — Paperclip context (issue, run, project, goal) is captured in sidecars when the caller provides it. Missing fields are null, never faked.
+3. **Standalone operation** — works on a bare Docker volume with no Paperclip. Metadata just has fewer fields.
+4. **Templates as guardrails** — agents can fetch output templates to know what format to produce. Not enforced in v1 (that's the verification plugin in Phase 2).
+5. **Logging deferred** — `// TODO: log` comments at every instrumentation point. Replaced with real calls when logging.ts ships.
+
+## Environment (container-level, stable)
+
+Read from `process.env` on extension load. These identify the agent, not the work.
+
+```
+AGENT_NAME          — required, identifies the agent namespace (e.g., "researcher")
+PAPERCLIP_AGENT_ID  — optional, Paperclip's UUID for this agent
+PAPERCLIP_COMPANY_ID — optional, Paperclip's company UUID
+```
+
+Per-invocation context (issue, run, project, goal) is NOT read from env. It comes through tool params so agents can call write_artifact with the right context per task.
+
+## promptSnippet
+
+Injected into every agent's system prompt automatically when the extension loads:
+
+```
+When sharing work with other agents or referencing artifacts:
+- Write output using the write_artifact tool. It returns a path.
+- Pass that path in Paperclip issue comments or handoff messages. Never paste artifact content inline.
+- To read another agent's work, call read_artifact with the path you received.
+- To discover available artifacts, call list_artifacts with filters.
+- Large documents belong in artifacts, not in messages. A path like "/artifacts/researcher/output/findings.md" is the reference — the downstream agent reads it when needed.
+```
+
+This replaces the need for manual pass-by-reference instructions in every AGENTS.md. Loading the extension teaches the behavior.
 
 ## Tool Definitions
 
-```typescript
-// --- Core artifact operations ---
-
-write_artifact({
-  name: string,           // required — artifact filename
-  content: string,        // required — artifact content (text/JSON/markdown)
-  subdirectory?: string,  // default: "output" — relative to agent namespace
-  type?: string,          // e.g., "research", "analysis", "content", "dataset", "code", "verdict", "receipt"
-  issue_id?: string,      // Paperclip issue ID for traceability
-  metadata?: object       // optional — arbitrary metadata (sources, timestamps, etc.)
-})
-
-read_artifact({
-  path: string            // required — full path (e.g., "/artifacts/researcher/output/findings.md")
-                          //            or relative to /artifacts (e.g., "researcher/output/findings.md")
-})
-
-list_artifacts({
-  agent?: string,         // filter by agent namespace
-  type?: string,          // filter by artifact type
-  issue_id?: string,      // filter by Paperclip issue
-  since?: string          // ISO 8601 — only artifacts created after this time
-})
-
-// --- Workspace management ---
-
-init_workspace()
-// Called automatically on agent startup.
-// Creates /artifacts/{agent-name}/ directory structure if missing.
-// Copies workspace templates (learnings.md, meta.json) from /app/templates/workspace/.
-// Idempotent — safe to call multiple times.
-
-// --- Learnings operations ---
-
-append_learning({
-  event: "rejection" | "error" | "discovery" | "waste" | "pattern",
-  issue_id?: string,
-  what_happened: string,
-  root_cause?: string,
-  action_taken?: string,
-  pattern?: string,       // reference to prior entry timestamp if recurring
-  upstream_improvement?: string
-})
-// Appends structured entry to /artifacts/{agent-name}/learnings.md
-// Also writes to /artifacts/meta/agent/{agent-name}/learnings-live.jsonl (machine-readable mirror)
-
-read_learnings({
-  agent?: string,         // default: self. Can read other agents' learnings.
-  event?: string,         // filter by event type
-  limit?: number          // default: 20
-})
-
-// --- Meta / centralized operations ---
-
-get_agent_profile({
-  agent: string           // agent name
-})
-// Reads /artifacts/meta/agent/{agent-name}/profile.md
-// Returns structured profile with health metrics, patterns, skill history
-
-list_agents()
-// Returns list of all agents with basic metadata from their meta.json files
-
-// --- Template operations ---
-
-get_template({
-  category: "brief" | "output" | "meta",
-  name: string            // e.g., "research-brief", "qa-verdict", "agent-profile"
-})
-// Reads template from /app/templates/{category}/{name}.md
-// Agents use this to reference correct templates when producing output
-```
-
-## Behavior
-
-### Agent startup (init_workspace)
-
-Runs automatically when the extension loads (Pi extension `onLoad` hook):
-
-1. Read AGENT_NAME from env
-2. Create directory tree if missing:
-   ```
-   /artifacts/{agent-name}/
-     current/
-     output/
-     logs/
-   /artifacts/meta/agent/{agent-name}/
-     learnings-archive/
-   ```
-3. Copy `learnings.md` from `/app/templates/workspace/learnings.md` if not exists
-4. Write/update `meta.json` from template with current env vars
-5. Write `learnings-live.jsonl` header if not exists (machine-readable mirror)
-6. Log initialization event via logging extension
-
 ### write_artifact
 
-1. Validate: name and content non-empty
-2. Resolve path: `/artifacts/{AGENT_NAME}/{subdirectory}/{name}`
-3. Create subdirectory if missing
-4. Write content to path
-5. Write metadata sidecar: `{path}.meta.json` with:
-   - agent, issue_id, type, created (ISO 8601), version, size_bytes, format (derived from extension)
-6. Log artifact_write event via logging extension
-7. Return full path for handoff to other agents
+```typescript
+write_artifact({
+  name: string,             // required — filename (e.g., "trend-analysis.md")
+  content: string,          // required — the artifact content
+  type: string,             // required — "research" | "analysis" | "content" | "dataset" | "code" | "verdict" | "receipt" | "brief"
+  subdirectory?: string,    // default: "output" — relative to agent namespace
+  template?: string,        // optional — which output template was followed (e.g., "research-output")
+  // --- Paperclip context (all optional, for traceability) ---
+  issue_id?: string,        // Paperclip issue ID this artifact relates to
+  run_id?: string,          // Paperclip run ID (primary correlation key across the system)
+  project_id?: string,      // Paperclip project ID
+  goal_id?: string,         // Paperclip goal ID
+})
+```
+
+Returns: `{ path: string, metadata_path: string }` — the artifact path and its sidecar path. The agent passes `path` in handoff messages.
 
 ### read_artifact
 
-1. Normalize path (accept absolute or relative to /artifacts)
-2. Verify path is under /artifacts (security: no path traversal)
-3. Read content
-4. Read .meta.json sidecar if present
-5. Return { content, metadata }
+```typescript
+read_artifact({
+  path: string              // required — full or relative path to artifact
+                            //   "/artifacts/researcher/output/findings.md" or
+                            //   "researcher/output/findings.md"
+})
+```
+
+Returns: `{ content: string, metadata: object | null }` — content + sidecar if present.
 
 ### list_artifacts
 
-1. Walk /artifacts directory tree
-2. Read .meta.json sidecars for filtering and summaries
-3. Apply filters (agent, type, issue_id, since)
-4. Return sorted list (newest first) with path + metadata summary
+```typescript
+list_artifacts({
+  agent?: string,           // filter by agent namespace
+  type?: string,            // filter by artifact type
+  issue_id?: string,        // filter by Paperclip issue
+  subdirectory?: string,    // filter by subdirectory (e.g., "output", "current")
+  since?: string            // ISO 8601 — only artifacts newer than this
+})
+```
 
-### append_learning
+Returns: array of `{ path, type, created, size_bytes, issue_id, run_id, template }` — metadata summaries, no content. Agent calls `read_artifact` for the ones it needs.
 
-1. Format entry per learnings.md template
-2. Append to `/artifacts/{AGENT_NAME}/learnings.md`
-3. Append JSON line to `/artifacts/meta/agent/{AGENT_NAME}/learnings-live.jsonl`
-4. If entry has `pattern` field, check if pattern count exceeds threshold (default: 3) → log `flag_for_kaizen` event
+### get_template
 
-### Learnings drain (deferred)
+```typescript
+get_template({
+  category: "brief" | "output",
+  name: string              // e.g., "research-brief", "qa-verdict", "research-output"
+})
+```
 
-Not part of the extension runtime. Separate process described in ROADMAP.md — "Planned: Learnings Drain Process". The artifacts extension writes raw learnings; the drain process reads and centralizes them later.
+Returns: `{ content: string }` — the template markdown. Agent uses it as a format reference when producing output.
 
-## Dependencies
+### init_workspace (not a tool — runs on load)
 
-- Shared Docker volume `shared-artifacts` mounted at `/artifacts` in all containers
-- Templates directory at `/app/templates/` inside container (COPYed from src/agents/templates/)
-- Logging extension (for event logging)
-- No external APIs
-- No npm dependencies (fs operations only)
+Automatic. Not callable by the agent. Runs when the extension initializes.
+
+## Behavior
+
+### Extension load (onLoad)
+
+```
+1. Read AGENT_NAME from env — if missing, skip registration (running outside container)
+2. Create directory tree if missing:
+     /artifacts/{AGENT_NAME}/
+       current/
+       output/
+   // TODO: log init event
+3. Register tools: write_artifact, read_artifact, list_artifacts, get_template
+4. Set promptSnippet (pass-by-reference instructions)
+```
+
+### write_artifact
+
+```
+1. Validate: name non-empty, content non-empty, type non-empty
+2. Resolve path: /artifacts/{AGENT_NAME}/{subdirectory}/{name}
+3. Create subdirectory if missing
+4. Write content to path
+5. Build metadata sidecar (see Metadata Sidecar below)
+6. Write sidecar to {path}.meta.json
+   // TODO: log artifact_write event with { path, type, size, issue_id, run_id }
+7. Return { path, metadata_path }
+```
+
+### read_artifact
+
+```
+1. Normalize path:
+   - If starts with "/artifacts/", use as-is
+   - If relative, prepend "/artifacts/"
+   - Reject if resolved path is not under /artifacts/ (path traversal guard)
+2. Read file content
+3. Read {path}.meta.json if exists, else metadata = null
+   // TODO: log artifact_read event with { path, agent requesting }
+4. Return { content, metadata }
+```
+
+### list_artifacts
+
+```
+1. Determine scan root:
+   - If agent filter: /artifacts/{agent}/
+   - Else: /artifacts/ (all agents)
+2. Walk directory, collect files that have .meta.json sidecars
+3. Read each sidecar, apply filters (type, issue_id, since)
+4. Sort newest first
+5. Return metadata summaries (no content)
+   // TODO: log artifact_list event with { filters, result_count }
+```
+
+### get_template
+
+```
+1. Resolve path: /app/templates/{category}/{name}.md
+   (or .json for publish-receipt)
+2. Read and return content
+3. If not found, return error with available templates in that category
+```
+
+## Metadata Sidecar
+
+Every artifact gets a companion `.meta.json`. This is the observability and data relation layer.
+
+```json
+{
+  "v": 1,
+  "agent": "researcher",
+  "agent_id": "paperclip-uuid-or-null",
+  "company_id": "paperclip-uuid-or-null",
+  "type": "research",
+  "template": "research-output",
+  "created": "2026-05-26T12:00:00Z",
+  "size_bytes": 4200,
+  "format": "md",
+  "paperclip": {
+    "issue_id": "uuid-or-null",
+    "run_id": "uuid-or-null",
+    "project_id": "uuid-or-null",
+    "goal_id": "uuid-or-null"
+  }
+}
+```
+
+Field rules:
+- `v` — schema version, always 1 for now. Lets future code handle old sidecars.
+- `agent` — from AGENT_NAME env. Always present.
+- `agent_id`, `company_id` — from container env. Null if not in Paperclip.
+- `type` — from tool param. Always present (required).
+- `template` — from tool param. Null if agent didn't specify.
+- `created` — ISO 8601, generated at write time.
+- `size_bytes` — byte length of content.
+- `format` — derived from filename extension (md, json, csv, txt). Default "txt".
+- `paperclip.*` — from tool params. Each field independently nullable. If the agent provides `issue_id` but not `project_id`, that is fine.
+
+The `run_id` is the primary correlation key. When Paperclip invokes an agent, the wake payload includes a run ID. If the agent passes it through to write_artifact, every artifact from that invocation shares the same run_id. You can join: Paperclip run → bridge request log → all artifacts written → downstream agent reads.
 
 ## Path Convention
 
 ```
 /artifacts/
-  {agent-name}/               Per-agent namespace
-    learnings.md              Kaizen log (append-only from agent)
-    meta.json                 Agent metadata
-    current/                  Work-in-progress
-      {issue-id}/             Per-issue subdirectory
-        input/                Copies of input artifacts
-        work/                 Intermediate files
-        output/               Final deliverables for this issue
-    output/                   Completed deliverables (promoted or direct)
-    logs/                     Execution logs (from logging extension)
-      run.log.jsonl
-  qa/                         QA verdicts (written by QA agent)
+  {agent-name}/
+    output/                 Completed deliverables (default subdirectory)
+      {name}                Artifact content
+      {name}.meta.json      Metadata sidecar
+    current/                Work-in-progress (agents can use freely)
+  qa/                       QA verdicts (QA agent writes here via subdirectory="")
     {issue-id}-verdict.md
-  publisher/                  Publish receipts (written by Publisher)
+  publisher/                Publish receipts
     {issue-id}-receipt.json
-  meta/                       Centralized meta-artifacts
-    agent/
-      {agent-name}/
-        profile.md            Agent profile (health, patterns, skill history)
-        learnings-digest.md   Distilled patterns from learnings
-        learnings-live.jsonl  Machine-readable learnings mirror
-        learnings-archive/    Monthly archives
-          {YYYY-MM}.md
-    pipeline/                 Pipeline-level metrics and reports
-      kaizen-report-{date}.md
 ```
+
+QA writes to `/artifacts/qa/` by being named "qa" (AGENT_NAME=qa). Same for publisher. No special-casing in the extension — the agent namespace IS the directory.
 
 ## Security
 
-- Agents write to their own namespace: `/artifacts/{own-agent-name}/`
-- Agents write to their own meta: `/artifacts/meta/agent/{own-agent-name}/`
-- QA additionally writes to `/artifacts/qa/` and other agents' learnings.md (pattern notes only)
-- All agents can read all of /artifacts (read-only cross-agent access)
-- Path traversal blocked: all paths validated against /artifacts root
-- No delete operations exposed to agents (immutable during a run)
+- Write: agents write only to `/artifacts/{own-AGENT_NAME}/`
+- Read: all agents can read all of `/artifacts/`
+- Path traversal: rejected if resolved path escapes `/artifacts/`
+- No delete tool exposed
+- No overwrite protection in v1 (last writer wins). Sidecar tracks creation time.
 
-## Git Sync (Deferred)
+## Dependencies
 
-See ROADMAP.md — "Planned: Git-Managed Agent Workspaces". Not in scope for initial implementation. The `meta.json.git` field is reserved for future use.
+- Shared Docker volume `shared-artifacts` mounted at `/artifacts`
+- Templates at `/app/templates/` (COPYed from src/agents/templates/ in Dockerfile)
+- `fs` and `path` from Node stdlib. Zero npm dependencies.
+- Logging extension: cross-dependency. V1 uses `// TODO: log` comments. When logging.ts ships, replace with `pi.callTool("log_event", {...})` or direct import if Pi supports extension-to-extension calls.
 
-## Loaded By
+## What v1 Does NOT Include
 
-All agents (universal extension).
+- **Learnings management** (append_learning, read_learnings) — agents can write to learnings.md manually via write_artifact. Structured tooling deferred to v2.
+- **Agent profiles / list_agents** — meta-agent operations, deferred.
+- **Artifact versioning** — last writer wins. Sidecar timestamps provide ordering.
+- **Content validation against templates** — extension provides templates but doesn't enforce. Verification plugin (Phase 2) handles enforcement.
+- **Git sync** — deferred per ROADMAP.md.
+- **MinIO backend** — deferred per ROADMAP.md. Tool interface designed to be backend-agnostic.
+- **Logging** — `// TODO: log` at every instrumentation point. Wired when logging.ts exists.
 
-## Template Integration
+## File
 
-The artifacts extension is the bridge between templates (at `/app/templates/`) and runtime:
+```
+src/agents/extensions/artifacts.ts    Single file, ~200-300 lines
+```
 
-1. **Workspace init** — copies workspace templates on startup
-2. **Output validation** — agents call `get_template("output", "research-output")` to get the expected format, then produce output matching it
-3. **Brief creation** — CEO calls `get_template("brief", "research-brief")` when creating issues
-4. **Meta management** — drain process uses meta templates for profiles and digests
-
-Templates are read-only at runtime. Changes go through the repo (src/agents/templates/) and are picked up on next container build.
+No subdirectory. V1 is small enough for one file. If it grows past 400 lines, split into artifacts/ directory with separate modules.

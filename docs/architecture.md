@@ -124,3 +124,13 @@ Pi extensions are TypeScript files loaded via `-e` flags at spawn time. They reg
 The Paperclip skills exist because the HTTP adapter does not inject MCP tools automatically. Local adapters (claude_local, pi_local) get these tools via a built-in MCP server subprocess. HTTP adapter agents must call the REST API directly, which is what the skills extension does.
 
 Extensions can import from relative paths (e.g., `paperclip-tools.ts` imports from `./client.js`). Pi resolves these at load time.
+
+### Deep Research Module
+
+The `deep-research.ts` extension delegates to a 15-file submodule at `extensions/deep-research/`. Key architectural patterns:
+
+- **Async I/O throughout**: `store.ts`, `checkpoint.ts`, and `query.ts` use `fs/promises` for all file operations (no blocking the event loop during multi-wave research runs). The only sync calls are `existsSync` guards and `readFileSync` in the checkpoint constructor for initial load.
+- **Concurrency control**: `semaphore.ts` provides a counting semaphore that caps concurrent LLM calls (`max_concurrent_llm`) and concurrent page fetches (`max_concurrent_fetch`), configured via named constants in `config.ts`.
+- **Validated LLM output**: `llm.ts` `structuredCall` accepts a validator callback (from `validate.ts`) instead of bare `as T` casts, catching malformed LLM responses at the call site rather than propagating them.
+- **Shared utilities**: `utils.ts` exports `sleep` and `stripHtml`, eliminating duplicated inline implementations across sweep, engine, and llm modules.
+- **Config as named constants**: `config.ts` centralizes all magic numbers (content length thresholds, snippet caps, chunk sizes, concurrency limits) as exported constants with documenting names.
