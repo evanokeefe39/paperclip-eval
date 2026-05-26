@@ -237,6 +237,62 @@ Implement TPS principles across the pipeline. Phased — each phase solves probl
 
 ---
 
+## Planned: Git-Managed Agent Workspaces
+
+Version-control the shared artifacts volume so learnings, outputs, QA verdicts, and publish receipts have full audit history. Board operator can clone, diff, and `git log --author=researcher` to review any agent's work over time.
+
+### Design (from agent-operating-standard.md, deferred)
+
+Two options explored:
+
+- **Option A (recommended for eval):** Single git repo at `/artifacts/.git/`, all agents as subdirectories, single branch. Commits attributed via `GIT_AUTHOR_NAME`. Simple to clone and browse. Downside: interleaved history.
+- **Option B:** Same repo, per-agent branches (`agent/ceo`, `agent/researcher`, etc.). Meta directory on `meta/learnings` branch. Cleaner per-agent history, more complex merge operations.
+
+Sync runs as a post-invocation hook in bridge.mjs or a sidecar container. Commit after each invocation, push to remote. Env vars: `ARTIFACTS_GIT_REMOTE`, `ARTIFACTS_GIT_ENABLED`, `ARTIFACTS_GIT_PUSH`.
+
+### Blocked on
+
+- Artifacts extension implementation (agents need to be writing to /artifacts/ first)
+- Enough eval runs to justify the overhead
+
+---
+
+## Planned: Learnings Drain Process
+
+Centralization mechanism that reads raw `learnings.md` from every agent, detects patterns, maintains per-agent profiles and digests at `/artifacts/meta/agent/{name}/`, archives old entries, and generates kaizen reports.
+
+### Design (from agent-operating-standard.md, deferred)
+
+- Runs as a sidecar container (`src/agents/drain/`) on a weekly schedule
+- Reads `learnings.md` + `learnings-live.jsonl` per agent
+- Pattern detection: tokenize root_cause fields, Jaccard similarity > 0.6, groups with ≥3 entries = pattern
+- Cross-agent pattern detection: same failure across multiple agents = systemic issue
+- Outputs: `learnings-digest.md` (per agent), `profile.md` (per agent), `kaizen-report-{date}.md` (pipeline-wide)
+- Archives entries older than 30 days to `learnings-archive/{YYYY-MM}.md`
+- If git sync enabled, commits and pushes after each drain
+
+### Directory structure produced
+
+```
+/artifacts/meta/
+  agent/{name}/
+    profile.md              Health metrics, recurring patterns, skill update history
+    learnings-digest.md     Distilled patterns from raw learnings
+    learnings-live.jsonl    Machine-readable mirror of learnings.md
+    learnings-archive/      Monthly archives
+  pipeline/
+    kaizen-report-{date}.md Weekly kaizen reports
+    systemic-patterns.md    Cross-agent patterns
+```
+
+### Blocked on
+
+- Agents writing to learnings.md (requires artifacts extension + TPS-integrated AGENTS.md)
+- Enough accumulated learnings to make pattern detection meaningful
+- Git workspace (optional, for versioned drain output)
+
+---
+
 ## Future considerations
 
 - Artifact metadata index (what was produced, by whom, when)

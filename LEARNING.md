@@ -486,3 +486,53 @@ Paperclip labels are a separate resource. The issue creation endpoint accepts `l
 - `priority` accepts: `low`, `medium`, `high`, `urgent`
 - `createdByAgentId` is accepted but ignored when using session auth (always set to null)
 - No DELETE endpoint for issues
+
+---
+
+## 2026-05-26 — HTTP adapter agents do not receive Paperclip MCP tools
+
+### What happened
+
+Agents registered with the HTTP adapter had no way to interact with Paperclip's coordination features (issues, comments, documents, approvals, interactions). The escalate extension could create issues and pause agents, but agents had no tools to list their inbox, read comments, create sub-issues, suggest tasks, or perform any other Paperclip operation.
+
+### Root cause
+
+Paperclip injects MCP tools only for local adapters (claude_local, codex_local, pi_local). These adapters run a built-in MCP server as a stdio subprocess that provides 40 tools wrapping the REST API. The HTTP adapter simply POSTs a JSON payload (`{prompt, systemPrompt}`) to the agent URL — no tools, no skills, no MCP server.
+
+The MCP server source is at `packages/mcp-server/src/tools.ts` in the Paperclip repo. The API client at `packages/mcp-server/src/client.ts` uses `Authorization: Bearer ${apiKey}` headers, but our eval setup uses session-cookie auth since agents authenticate via admin credentials, not API keys.
+
+### Solution
+
+Created Pi extensions at `src/agents/skills/` that re-implement all 40 Paperclip MCP tools as Pi-native tools:
+
+- `client.ts` — shared Paperclip API client using session-cookie auth (matching the existing escalate.ts pattern) with a 25-minute session cache
+- `paperclip-tools.ts` — Pi extension that registers all 40 tools with TypeBox schemas
+
+The extension is loaded via `-e /app/skills/paperclip-tools.ts` in bridge.mjs spawn args. The Dockerfile copies `skills/` into `/app/skills/`.
+
+### Key details
+
+- API paths match the upstream MCP server exactly — all paths relative to `/api` (e.g., `/agents/me`, `/issues/{id}/checkout`, `/companies/{cid}/issues`)
+- Session-cookie auth instead of API key auth — the MCP server uses `Authorization: Bearer`, our extension uses `Cookie:` from `POST /api/auth/sign-in/email`
+- Session cached for 25 minutes (sessions typically last 30) to avoid re-authenticating on every tool call within a single agent run
+- `isConfigured()` gate: if any of the three auth env vars are missing, the extension silently skips registration (no crash, no error)
+- Tool names use snake_case (`paperclip_me`, `paperclip_list_issues`) matching Pi convention, not camelCase like the MCP tools
+
+### Tool categories (40 total)
+
+- Identity & inbox (4): me, inbox, list/get agents
+- Issues (7): list, get, create, update, checkout, release, heartbeat context
+- Comments (3): list, get, add (with resume/reopen/interrupt flags)
+- Documents (5): list, get, upsert, list revisions, restore revision
+- Projects & goals (4): list/get each
+- Interactions (3): suggest_tasks, ask_user_questions, request_confirmation
+- Approvals (8): CRUD, decisions, link/unlink to issues, comments
+- Workspace runtime (3): get, control services, wait for service
+- Escape hatch (1): paperclip_api_request for any /api endpoint
+
+### References
+
+- Upstream MCP server: `packages/mcp-server/src/tools.ts` in the Paperclip repo
+- Upstream client: `packages/mcp-server/src/client.ts`
+- Local extension: `src/agents/skills/paperclip-tools.ts`
+- Tests: `tests/paperclip-tools/unit-test.mjs` (162 tests), `tests/paperclip-tools/integration-test.sh`

@@ -37,12 +37,13 @@
 - Mode: `authenticated` with `private` exposure
 - Persistent data: `paperclip-data` volume at `/paperclip`
 
-### Agent Bridge Containers (CEO, Researcher)
+### Agent Bridge Containers (CEO, Researcher, Coder, Data, Writer, QA)
 
 - Image: Custom, built from shared `Dockerfile` (node:22-slim + Pi CLI)
 - Role: HTTP-to-RPC translation layer between Paperclip and Pi
 - Stateless per-request: each invocation spawns a fresh Pi process
 - Each container runs `bridge.mjs` as its entrypoint
+- Pi extensions loaded at spawn: web-search, web-fetch, escalate, paperclip-tools
 
 ### Pi CLI
 
@@ -100,7 +101,26 @@ src/agents/{agent_name}/
   .pi/agent/config.yml     Model roles, retry/fallback chains, feature flags
   .pi/agent/models.json    Provider credentials and endpoint config
   .pi/agent/settings.json  Pi settings
+  .pi/agent/auth.json      Provider auth (gitignored, copy from root auth.json)
+  agent.json               Agent registration metadata (name, role, adapter config)
   AGENTS.md                Agent persona and instructions
 ```
 
 The `config.yml` defines model roles (smol, default, agentic, plan, review, commit) with fallback chains across providers (groq, nvidia, minimax, deepseek, cerebras, openrouter, mistral).
+
+## Extension Architecture
+
+Pi extensions are TypeScript files loaded via `-e` flags at spawn time. They register tools that the LLM can call during execution.
+
+```
+/app/extensions/             Custom tools (web search, fetch, escalate, etc.)
+/app/skills/                 Paperclip platform tools (REST API wrappers)
+  client.ts                  Shared auth client — session cookie with 25-min cache
+  paperclip-tools.ts         40 tools matching upstream MCP server (issues, comments,
+                             documents, agents, projects, goals, interactions, approvals,
+                             workspace runtime, escape hatch)
+```
+
+The Paperclip skills exist because the HTTP adapter does not inject MCP tools automatically. Local adapters (claude_local, pi_local) get these tools via a built-in MCP server subprocess. HTTP adapter agents must call the REST API directly, which is what the skills extension does.
+
+Extensions can import from relative paths (e.g., `paperclip-tools.ts` imports from `./client.js`). Pi resolves these at load time.

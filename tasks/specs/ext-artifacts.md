@@ -139,17 +139,9 @@ Runs automatically when the extension loads (Pi extension `onLoad` hook):
 3. Append JSON line to `/artifacts/meta/agent/{AGENT_NAME}/learnings-live.jsonl`
 4. If entry has `pattern` field, check if pattern count exceeds threshold (default: 3) → log `flag_for_kaizen` event
 
-### Learnings drain (periodic process)
+### Learnings drain (deferred)
 
-Not part of the extension runtime. Runs as a separate process (cron in container or triggered by CEO/meta-agent):
-
-1. For each agent, read `/artifacts/meta/agent/{name}/learnings-live.jsonl`
-2. Group entries by event type and detect patterns (entries with similar root_cause or what_happened)
-3. Write `/artifacts/meta/agent/{name}/learnings-digest.md` from digest template
-4. Archive entries older than 30 days to `/artifacts/meta/agent/{name}/learnings-archive/{YYYY-MM}.md`
-5. Remove archived entries from learnings.md (keeping only last 30 days)
-6. Update `/artifacts/meta/agent/{name}/profile.md` with pattern counts and health metrics
-7. If git sync enabled, commit and push changes
+Not part of the extension runtime. Separate process described in ROADMAP.md — "Planned: Learnings Drain Process". The artifacts extension writes raw learnings; the drain process reads and centralizes them later.
 
 ## Dependencies
 
@@ -199,16 +191,9 @@ Not part of the extension runtime. Runs as a separate process (cron in container
 - Path traversal blocked: all paths validated against /artifacts root
 - No delete operations exposed to agents (immutable during a run)
 
-## Git Sync (Optional, Phase 2+)
+## Git Sync (Deferred)
 
-See docs/agent-operating-standard.md section on git-managed workspaces.
-
-When enabled (`meta.json.git.enabled = true`):
-- artifacts extension commits to a per-agent branch after each write_artifact and append_learning call
-- Periodic push to remote (configurable interval, default: end of each invocation)
-- Branch naming: `agent/{agent-name}`
-- Learnings drain process merges and pushes to `meta/learnings` branch
-- Board operator pulls to review — version history gives full audit trail
+See ROADMAP.md — "Planned: Git-Managed Agent Workspaces". Not in scope for initial implementation. The `meta.json.git` field is reserved for future use.
 
 ## Loaded By
 

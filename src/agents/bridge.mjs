@@ -121,6 +121,7 @@ const server = http.createServer(async (req, res) => {
     "-e", "/app/extensions/web-search.ts",
     "-e", "/app/extensions/web-fetch.ts",
     "-e", "/app/extensions/escalate.ts",
+    "-e", "/app/extensions/web-scrape.ts",
     "-e", "/app/skills/paperclip-tools.ts",
     ...(systemPrompt ? ["--append-system-prompt", systemPrompt] : []),
   ];

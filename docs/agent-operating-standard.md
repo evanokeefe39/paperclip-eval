@@ -1085,13 +1085,13 @@ Templates are read-only at runtime. Changes go through the repo and are picked u
 
 ### 8.6 Learnings Corpus
 
-The collection of all agents' `learnings.md` files across `/artifacts/*/learnings.md`, their machine-readable mirrors in `/artifacts/meta/agent/*/learnings-live.jsonl`, and the distilled digests. Three access patterns:
+The collection of all agents' `learnings.md` files across `/artifacts/*/learnings.md` and their machine-readable mirrors in `/artifacts/meta/agent/*/learnings-live.jsonl`. Two access patterns now, one deferred:
 
 1. **Agent-to-agent** — QA reads Researcher's learnings to detect recurring rejection patterns. Uses `read_learnings(agent="researcher")` via artifacts extension.
-2. **Drain process** — Reads all agents' learnings, detects patterns, generates digests and profiles in `/artifacts/meta/`. See Part 10.
-3. **Board operator** — Reads learnings directly or via git history for genchi genbutsu.
+2. **Board operator** — Reads learnings directly for genchi genbutsu.
+3. **Drain process (deferred)** — Centralized pattern detection, digest generation, and archival. See ROADMAP.md.
 
-The learnings corpus is the raw material for the kaizen feedback loop. Individual entries are written by agents; patterns are extracted by the drain process; improvements are proposed by CEO and approved by the board.
+The learnings corpus is the raw material for the kaizen feedback loop. Individual entries are written by agents via `append_learning`. Centralized pattern extraction and automated kaizen reporting come later.
 
 ### 8.7 Centralized Meta-Artifact Store
 
@@ -1119,244 +1119,7 @@ Every agent writes to its own `/artifacts/meta/agent/{name}/learnings-live.jsonl
 
 ---
 
-## Part 9: Git-Managed Workspaces
-
-Agent workspaces live on Docker volumes, which means learnings, logs, and output artifacts are ephemeral — they survive container restarts but are not version controlled, not synced to a remote, and not auditable beyond what is on the volume right now.
-
-Git solves this. Each agent's `/artifacts/{name}/` directory becomes a git working tree. Changes are committed after each invocation and pushed to a remote. The board operator can pull any agent's history and see exactly what changed, when, and in response to what.
-
-### 9.1 Architecture
-
-```
-shared-artifacts volume (/artifacts/)
-  ├── .git/                           Bare repo or worktree root
-  ├── ceo/                            Agent namespace (git-tracked)
-  │   ├── learnings.md
-  │   ├── meta.json
-  │   ├── output/
-  │   └── logs/
-  ├── researcher/
-  ├── meta/                           Centralized meta (git-tracked)
-  │   └── agent/
-  └── ...
-```
-
-Two approaches, choose based on complexity tolerance:
-
-**Option A — Single repo, all agents (simpler):**
-- One git repo at `/artifacts/.git/`
-- All agent directories are subdirectories in the same repo
-- Commits attributed to the agent that made the change (via `GIT_AUTHOR_NAME`)
-- Single remote, single branch (`main` or `artifacts`)
-- Simple to set up, simple to clone and browse
-- Downside: every agent's commit history is interleaved
-
-**Option B — Per-agent branches (more isolated):**
-- One git repo at `/artifacts/.git/`
-- Each agent works on its own branch: `agent/ceo`, `agent/researcher`, etc.
-- Meta directory tracked on `meta/learnings` branch
-- Drain process merges learnings from agent branches into the meta branch
-- Board operator checks out whichever branch they want to review
-- Downside: more complex, merge operations needed
-
-**Recommended for eval stage: Option A.** Single repo, single branch, all agents. Switch to Option B if the interleaved history becomes unreadable.
-
-### 9.2 Git Sync Process
-
-Runs as a post-invocation hook in bridge.mjs or as a sidecar container.
-
-```
-After each agent invocation completes:
-1. cd /artifacts
-2. git add {agent-name}/
-3. git add meta/agent/{agent-name}/
-4. git commit --author="{agent-name} <{agent-name}@pipeline>" \
-     -m "{agent-name}: {issue-id} — {brief summary}"
-5. git push origin main
-```
-
-The commit message includes the Paperclip issue ID for traceability. The agent name in the author field makes `git log --author=researcher` work as a per-agent history filter.
-
-### 9.3 What Gets Tracked
-
-| Path | Tracked | Rationale |
-|------|---------|-----------|
-| `/artifacts/{name}/learnings.md` | Yes | Primary kaizen data. Version history shows learning over time. |
-| `/artifacts/{name}/meta.json` | Yes | Agent metadata changes are auditable. |
-| `/artifacts/{name}/output/` | Yes | Completed deliverables. Version history catches revisions after QA rejection. |
-| `/artifacts/{name}/current/` | No (.gitignore) | Work-in-progress. Ephemeral. Committed only when promoted to output/. |
-| `/artifacts/{name}/logs/` | Configurable | Large JSONL files. Track if storage is cheap; ignore if noisy. Default: ignore. |
-| `/artifacts/meta/` | Yes | Centralized profiles, digests, kaizen reports. Critical audit trail. |
-| `/artifacts/qa/` | Yes | QA verdicts are immutable records. Must be versioned. |
-| `/artifacts/publisher/` | Yes | Publish receipts are audit records. |
-
-### 9.4 Remote Configuration
-
-For eval stage, a private GitHub/GitLab repo works fine. The artifacts volume initializes with:
-
-```bash
-cd /artifacts
-git init
-git remote add origin ${ARTIFACTS_GIT_REMOTE}
-git checkout -b main
-```
-
-This runs once during `setup.sh`. Subsequent container starts find the existing repo.
-
-Environment variables:
-- `ARTIFACTS_GIT_REMOTE` — remote URL (SSH or HTTPS)
-- `ARTIFACTS_GIT_ENABLED` — `true` to enable sync (default: `false` during early eval)
-- `ARTIFACTS_GIT_PUSH` — `true` to push after each commit (set `false` for local-only tracking)
-
-### 9.5 Board Operator Workflow
-
-```bash
-# Clone the artifacts repo to review agent work
-git clone $ARTIFACTS_GIT_REMOTE artifacts-review
-cd artifacts-review
-
-# See what researcher did this week
-git log --author=researcher --since="1 week ago" --oneline
-
-# See all changes to a specific learnings file
-git log -p researcher/learnings.md
-
-# See what changed after a QA rejection
-git log --author=researcher --grep="ISSUE-123"
-
-# Diff a research output between first draft and post-QA revision
-git diff HEAD~2 HEAD -- researcher/output/trend-analysis.md
-```
-
----
-
-## Part 10: Learnings Drain Process
-
-The drain process is the centralization mechanism. It reads raw learnings from every agent, distills patterns, maintains agent profiles, and archives old entries. This is how individual agent experiences become organizational knowledge.
-
-### 10.1 Trigger
-
-Three options (not mutually exclusive):
-
-1. **Scheduled** — cron job in a sidecar container, runs weekly (default)
-2. **Threshold-based** — artifacts extension triggers drain when any agent's learnings.md exceeds 50 entries
-3. **CEO-initiated** — CEO agent calls a `drain_learnings` tool as part of kaizen review
-
-For eval stage, start with scheduled (weekly). Add threshold trigger when the system is running enough to generate volume.
-
-### 10.2 Process Steps
-
-```
-For each agent in /artifacts/*/meta.json:
-
-1. READ    /artifacts/{agent}/learnings.md
-           /artifacts/meta/agent/{agent}/learnings-live.jsonl
-
-2. PARSE   Extract structured entries from both sources
-           Deduplicate (learnings.md is human-readable, jsonl is machine-readable)
-
-3. DETECT  Group entries by event type and root_cause similarity
-           Identify patterns: ≥3 entries with similar root_cause = pattern
-           Flag new patterns not already in learnings-digest.md
-
-4. DIGEST  Update /artifacts/meta/agent/{agent}/learnings-digest.md
-           - Add new patterns with frequency, trigger, root cause, recommended action
-           - Update frequency counts on existing patterns
-           - Move resolved patterns to "resolved" section
-
-5. PROFILE Update /artifacts/meta/agent/{agent}/profile.md
-           - Recalculate health metrics (first-pass yield, escalation rate, etc.)
-           - Update recurring patterns section
-           - Append skill update history if changes were made
-
-6. ARCHIVE Move entries older than 30 days from learnings.md to
-           /artifacts/meta/agent/{agent}/learnings-archive/{YYYY-MM}.md
-           Keep most recent 30 days in learnings.md
-
-7. COMMIT  If git sync enabled:
-           git add meta/agent/{agent}/
-           git commit --author="drain <drain@pipeline>" \
-             -m "drain: {agent} — {n} entries processed, {p} patterns detected"
-           git push
-```
-
-### 10.3 Pattern Detection
-
-Simple heuristic for eval stage (no ML needed):
-
-1. Tokenize `root_cause` and `what_happened` fields
-2. Compute pairwise similarity (Jaccard on token sets)
-3. Entries with similarity > 0.6 are grouped
-4. Groups with ≥3 members are patterns
-5. Pattern name derived from most common tokens in the group
-
-This runs in Node.js inside the drain container. No external dependencies.
-
-### 10.4 Cross-Agent Patterns
-
-After processing individual agents, the drain also checks for cross-agent patterns:
-
-1. Collect all patterns from all agents' digests
-2. Group by root_cause similarity across agents
-3. Cross-agent patterns (same failure appearing in multiple agents) get flagged as systemic issues
-4. Systemic patterns written to `/artifacts/meta/pipeline/systemic-patterns.md`
-5. CEO reviews systemic patterns in kaizen report
-
-Example: if Researcher and Writer both have patterns about "brief missing scope boundaries," that is a systemic issue with CEO's brief-writing, not an individual agent problem.
-
-### 10.5 Kaizen Report Generation
-
-The drain process also generates the periodic kaizen report:
-
-```
-/artifacts/meta/pipeline/kaizen-report-{YYYY-MM-DD}.md
-
-Contents:
-- Period covered
-- Per-agent health summary (from profiles)
-- Top patterns by frequency (from digests)
-- Systemic patterns (cross-agent)
-- New patterns since last report
-- Resolved patterns since last report
-- Recommended actions (from pattern recommended_action fields)
-- Cost summary (from logging data, if available)
-```
-
-CEO reviews this report during its heartbeat cycle. Improvement proposals become Paperclip issues in the pipeline-operations project.
-
-### 10.6 Implementation
-
-The drain process is a Node.js script (no framework, no transpiler, consistent with bridge.mjs):
-
-```
-src/agents/drain/
-  drain.mjs           Main drain process
-  patterns.mjs        Pattern detection logic
-  digest.mjs          Digest and profile generation
-  archive.mjs         Learnings archival
-  report.mjs          Kaizen report generation
-  Dockerfile          Lightweight container (node:22-slim, no Pi needed)
-```
-
-Added to docker-compose.yml as a service that runs on a schedule:
-
-```yaml
-drain:
-  build:
-    context: .
-    dockerfile: drain/Dockerfile
-  volumes:
-    - shared-artifacts:/artifacts
-  environment:
-    - ARTIFACTS_GIT_ENABLED=${ARTIFACTS_GIT_ENABLED:-false}
-    - ARTIFACTS_GIT_REMOTE=${ARTIFACTS_GIT_REMOTE:-}
-    - DRAIN_INTERVAL_HOURS=168  # weekly
-  restart: unless-stopped
-```
-
----
-
-## Part 11: Toyota Management Principles — Organizational Application
+## Part 9: Toyota Management Principles — Organizational Application
 
 Beyond TPS (the production system), the Toyota Way includes management principles that govern how the organization operates. These map to the relationship between the board operator, the CEO agent, and the system as a whole.
 
@@ -1392,7 +1155,7 @@ Beyond TPS (the production system), the Toyota Way includes management principle
 
 ---
 
-## Part 12: Implementation Checklist
+## Part 10: Implementation Checklist
 
 For each new agent, complete every item:
 

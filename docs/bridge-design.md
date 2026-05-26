@@ -93,7 +93,7 @@ Note: `renderedPrompt` is accepted as an alias for `prompt` (Paperclip sends thi
 ```
 1. Receive POST /invoke
 2. Parse JSON body, extract prompt and systemPrompt
-3. Build spawn args: --mode rpc --no-session --provider X --model Y [--append-system-prompt Z]
+3. Build spawn args: --mode rpc --no-session --provider X --model Y -e extensions... -e skills/paperclip-tools.ts [--append-system-prompt Z]
 4. Spawn pi process with cwd=workspace, env=process.env + body.env
 5. Write {"type":"prompt","message":"..."}\n to stdin immediately
 6. Poll events[] every 50ms:
