@@ -36,3 +36,6 @@ tests/results/
 
 # Spikes (scratch experiments)
 spikes/
+
+# Aritfacts
+.artifacts

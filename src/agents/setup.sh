@@ -1,14 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Prevent MSYS/Git Bash from mangling /unix/paths in docker exec args
+export MSYS_NO_PATHCONV=1
 
-PAPERCLIP_URL="${PAPERCLIP_URL:-http://localhost:3100}"
+if command -v cygpath >/dev/null 2>&1; then
+  SCRIPT_DIR="$(cygpath -w "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)")"
+  REPO_ROOT="$(cygpath -w "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)")"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+fi
+
+PAPERCLIP_URL="${PAPERCLIP_URL:-http://127.0.0.1:3100}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@eval.local}"
 ADMIN_PASS="${ADMIN_PASS:-eval-admin-2026}"
 COMPANY_NAME="${COMPANY_NAME:-eval}"
-COMPOSE_FILE="${COMPOSE_FILE:-../../docker-compose.yml}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 SKIP_BUILD="${SKIP_BUILD:-}"
+
+for arg in "$@"; do
+  case "$arg" in
+    --skip-build) SKIP_BUILD=1 ;;
+  esac
+done
 
 COOKIE_JAR="$(mktemp)"
 trap 'rm -f "$COOKIE_JAR"' EXIT
@@ -77,14 +92,16 @@ wait_healthy() {
   local deadline=$((SECONDS + timeout))
   log cyan "Waiting for Paperclip..."
   while [[ $SECONDS -lt $deadline ]]; do
-    if curl -sf "${PAPERCLIP_URL}/api/health" -o /dev/null 2>/dev/null; then
+    if dc exec -T paperclip node -e \
+      "fetch('http://localhost:3100/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))" \
+      >/dev/null 2>&1; then
       log green "Paperclip healthy."
       return 0
     fi
     sleep 2
   done
   log red "Paperclip not healthy after ${timeout}s"
-  docker compose -f "$COMPOSE_FILE" logs paperclip --tail 20
+  dc logs paperclip --tail 20
   return 1
 }
 
@@ -106,19 +123,12 @@ authenticate() {
 
 bootstrap() {
   log cyan "Creating bootstrap invite..."
-  local pc
-  pc="$(docker compose -f "$COMPOSE_FILE" ps --format '{{.Name}}' | grep paperclip | head -1)"
-  if [[ -z "$pc" ]]; then
-    log red "Cannot find paperclip container"
-    return 1
-  fi
 
-  docker cp "${SCRIPT_DIR}/paperclip-config.json" "${pc}:/paperclip/instances/default/config.json" 2>/dev/null || true
-  docker exec "$pc" chown node:node /paperclip/instances/default/config.json 2>/dev/null || true
-  docker cp "${SCRIPT_DIR}/bootstrap-invite.cjs" "${pc}:/tmp/bootstrap-invite.cjs"
+  cat "${SCRIPT_DIR}/paperclip-config.json" | dc exec -T paperclip sh -c 'cat > /paperclip/instances/default/config.json && chown node:node /paperclip/instances/default/config.json' 2>/dev/null || true
+  cat "${SCRIPT_DIR}/bootstrap-invite.cjs" | dc exec -T paperclip sh -c 'cat > /tmp/bootstrap-invite.cjs'
 
   local output
-  output="$(docker exec "$pc" node /tmp/bootstrap-invite.cjs 2>&1)"
+  output="$(dc exec -T paperclip node /tmp/bootstrap-invite.cjs 2>&1)"
 
   if echo "$output" | grep -qi "already exists"; then
     log green "  Bootstrap already done, skipping."
@@ -159,6 +169,37 @@ create_company() {
   log green "  Company: $COMPANY_ID"
 }
 
+create_agent_api_key() {
+  local agent_id="$1" agent_name="$2"
+  local key_name="${agent_name,,}-agent-key"
+  local result
+  result="$(api_post "/api/agents/${agent_id}/keys" \
+    "$(jq -n --arg n "$key_name" '{name:$n}')")"
+  echo "$result" | jq -r '.token'
+}
+
+write_agent_env() {
+  local agent_dir="$1" agent_id="$2" api_key="$3"
+  local env_file="${agent_dir}/.env"
+  local existing_content=""
+
+  if [[ -f "$env_file" ]]; then
+    existing_content="$(grep -vE '^(PAPERCLIP_AGENT_ID|PAPERCLIP_API_KEY|PAPERCLIP_API_URL|PAPERCLIP_COMPANY_ID)=' "$env_file" 2>/dev/null || true)"
+  fi
+
+  {
+    echo "PAPERCLIP_AGENT_ID=${agent_id}"
+    echo "PAPERCLIP_API_KEY=${api_key}"
+    echo "PAPERCLIP_API_URL=http://paperclip:3100"
+    echo "PAPERCLIP_COMPANY_ID=${COMPANY_ID}"
+    if [[ -n "$existing_content" ]]; then
+      echo "$existing_content"
+    fi
+  } > "$env_file"
+
+  log green "    Wrote ${env_file}"
+}
+
 register_agent() {
   local agent_dir="$1"
   local agent_json="${agent_dir}/agent.json"
@@ -170,39 +211,48 @@ register_agent() {
   local name
   name="$(jq -r '.name' "$agent_json")"
 
-  local existing_agents
+  local existing_agents agent_id=""
   if existing_agents="$(api_get "/api/companies/${COMPANY_ID}/agents" 2>/dev/null)"; then
-    local found_id
-    found_id="$(echo "$existing_agents" | jq -r --arg n "$name" \
+    agent_id="$(echo "$existing_agents" | jq -r --arg n "$name" \
       '.[] | select(.name == $n) | .id // empty' 2>/dev/null | head -1)"
-    if [[ -n "$found_id" ]]; then
-      REGISTERED_AGENTS["$name"]="$found_id"
-      EXISTING_FLAGS["$name"]="true"
-      log green "  $name: $found_id (existing)"
-      return 0
-    fi
   fi
 
-  local payload
-  payload="$(cat "$agent_json")"
+  if [[ -n "$agent_id" ]]; then
+    REGISTERED_AGENTS["$name"]="$agent_id"
+    EXISTING_FLAGS["$name"]="true"
+    log green "  $name: $agent_id (existing)"
+  else
+    local payload
+    payload="$(cat "$agent_json")"
 
-  local reports_to
-  reports_to="$(echo "$payload" | jq -r '.reportsTo // empty')"
-  if [[ -n "$reports_to" ]]; then
-    local manager_id="${REGISTERED_AGENTS[$reports_to]:-}"
-    if [[ -z "$manager_id" ]]; then
-      log red "  $name requires reportsTo=$reports_to but that agent is not registered"
-      return 1
+    local reports_to
+    reports_to="$(echo "$payload" | jq -r '.reportsTo // empty')"
+    if [[ -n "$reports_to" ]]; then
+      local manager_id="${REGISTERED_AGENTS[$reports_to]:-}"
+      if [[ -z "$manager_id" ]]; then
+        log red "  $name requires reportsTo=$reports_to but that agent is not registered"
+        return 1
+      fi
+      payload="$(echo "$payload" | jq --arg id "$manager_id" '.reportsTo = $id')"
     fi
-    payload="$(echo "$payload" | jq --arg id "$manager_id" '.reportsTo = $id')"
+
+    local result
+    result="$(api_post "/api/companies/${COMPANY_ID}/agent-hires" "$payload")"
+    agent_id="$(echo "$result" | jq -r '.agent.id')"
+    REGISTERED_AGENTS["$name"]="$agent_id"
+    log green "  $name: $agent_id"
   fi
 
-  local result
-  result="$(api_post "/api/companies/${COMPANY_ID}/agent-hires" "$payload")"
-  local agent_id
-  agent_id="$(echo "$result" | jq -r '.agent.id')"
-  REGISTERED_AGENTS["$name"]="$agent_id"
-  log green "  $name: $agent_id"
+  local env_file="${agent_dir}/.env"
+  if [[ "${EXISTING_FLAGS[$name]:-}" == "true" ]] && \
+     [[ -f "$env_file" ]] && grep -q "^PAPERCLIP_API_KEY=pcp_" "$env_file" 2>/dev/null; then
+    log green "    API key already in ${env_file}"
+  else
+    log cyan "    Creating API key for $name..."
+    local api_key
+    api_key="$(create_agent_api_key "$agent_id" "$name")"
+    write_agent_env "$agent_dir" "$agent_id" "$api_key"
+  fi
 }
 
 discover_agents() {
@@ -252,23 +302,40 @@ print_summary() {
   done
 }
 
+copy_auth_json() {
+  local root_auth="${SCRIPT_DIR}/../../auth.json"
+  if [[ ! -f "$root_auth" ]]; then
+    log red "auth.json not found at repo root"
+    return 1
+  fi
+  for dir in "${SCRIPT_DIR}"/*/; do
+    [[ -f "${dir}.pi/agent/config.yml" ]] || continue
+    local target="${dir}.pi/agent/auth.json"
+    rm -f "$target"
+    cp "$root_auth" "$target"
+  done
+  log green "auth.json distributed to agent dirs."
+}
+
+dc() {
+  (cd "$REPO_ROOT" && docker compose -f "$COMPOSE_FILE" "$@")
+}
+
 main() {
   check_deps
-
-  if [[ "${COMPOSE_FILE:0:1}" != "/" ]]; then
-    COMPOSE_FILE="${SCRIPT_DIR}/${COMPOSE_FILE}"
-  fi
 
   declare -gA REGISTERED_AGENTS=()
   declare -gA EXISTING_FLAGS=()
   declare -g COMPANY_ID=""
   declare -g COMPANY_EXISTING="false"
 
+  copy_auth_json
+
   log cyan "Starting services..."
   if [[ -n "$SKIP_BUILD" ]]; then
-    docker compose -f "$COMPOSE_FILE" up -d
+    dc up -d
   else
-    docker compose -f "$COMPOSE_FILE" up -d --build
+    dc up -d --build
   fi
 
   wait_healthy

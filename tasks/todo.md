@@ -1,60 +1,68 @@
-# E2E / Integration Test Suite
+# Artifact Store v2: Postgres + MinIO + Filestash
 
-## Goal
-Validate agents are prod-ready by testing the full Paperclip dispatch chain, not just bridge-level HTTP.
+Spec: `tasks/specs/artifact-store-v2.md`
 
-## Test Architecture
+## Infrastructure
 
-**Bash scripts** (tests/e2e/) — API-level E2E via curl + jq. CI-ready, portable.
-**Playwright** (future) — browser-level UI verification for cross-agent visibility.
+- [ ] Write `scripts/init-artifact-db.sql` (CREATE DATABASE + schema)
+- [ ] Add postgres container to docker-compose.yml (postgres:17-alpine, healthcheck, init script mount)
+- [ ] Add minio container to docker-compose.yml (minio/minio, healthcheck, named volume)
+- [ ] Add minio-init container (one-shot mc bucket creation)
+- [ ] Add filestash container to docker-compose.yml (machines/filestash, port 8334)
+- [ ] Migrate Paperclip to external Postgres (DATABASE_URL env var, remove paperclip-data volume)
+- [ ] Remove `./artifacts:/artifacts` bind mount from all agents
+- [ ] Add new volumes: postgres-data, minio-data
+- [ ] Update `.env.example` with Postgres, MinIO, artifact store vars
+- [ ] Verify `docker compose up -d` brings up full stack clean
 
-Shared helpers in `tests/e2e/helpers.sh`: auth, health polling, HTTP assertions.
+## setup.sh
 
-## Tests — Priority Order
+- [ ] Add Postgres health wait
+- [ ] Add MinIO health wait
+- [ ] Create MinIO service accounts per agent with IAM policies
+- [ ] Write MINIO_ACCESS_KEY, MINIO_SECRET_KEY, ARTIFACT_DB_URL to agent .env files
+- [ ] Test idempotent re-run
 
-### E2E-1: Agent Registration Verification
-- Authenticate with Paperclip API
-- GET /api/companies → find company ID
-- GET /api/companies/{cid}/agents → verify CEO and Researcher exist
-- GET /api/companies/{cid}/org → verify org tree structure (researcher reports to CEO)
-- Assert adapter config points to correct internal URLs
+## Extension Rewrite
 
-### E2E-2: Paperclip-to-Agent Invocation
-- Authenticate, find company and CEO agent ID
-- POST /api/agents/{id}/heartbeat/invoke → trigger CEO through Paperclip dispatch
-- Verify Paperclip forwards to http://ceo:8080/invoke inside Docker network
-- Assert response indicates successful agent execution (not timeout/error)
+- [ ] Add npm deps to Dockerfile: @aws-sdk/client-s3, pg, ulid
+- [ ] Write `src/agents/rbac.json` (per-agent read/write/delete rules)
+- [ ] Rewrite artifacts.ts: MinIO backend for blobs
+- [ ] Rewrite artifacts.ts: Postgres backend for metadata
+- [ ] ULID generation for artifact IDs
+- [ ] SHA-256 content hashing + dedup check
+- [ ] `artifact://` URI scheme in write_artifact return
+- [ ] `read_artifact` resolves URIs + checks RBAC
+- [ ] `read_artifact` legacy path support with deprecation warning
+- [ ] `list_artifacts` queries Postgres instead of filesystem walk
+- [ ] `get_template` unchanged
+- [ ] Updated promptSnippet (URIs instead of paths)
+- [ ] RBAC enforcement on read_artifact and list_artifacts
 
-### E2E-3: Cross-Agent Visibility
-- Trigger CEO with a task that references researcher's domain
-- Verify both agents accessible via org tree API
-- Check that agent outputs are queryable through Paperclip API
-- (Playwright follow-up: verify in UI that CEO can see researcher output)
+## Validation
 
-### E2E-4: Character Limit Regression
-- Send payload with systemPrompt > 8,191 chars through Paperclip dispatch
-- Assert response is coherent (contains expected acknowledgment, not gibberish)
-- This is the pi_local CLI arg limit that drove the HTTP adapter design
+- [ ] Paperclip starts correctly on external Postgres
+- [ ] Agent can write_artifact and get back artifact:// URI
+- [ ] Agent can read_artifact by URI
+- [ ] Agent can read_artifact by legacy path (with deprecation warning)
+- [ ] list_artifacts returns URI-based results from Postgres
+- [ ] RBAC blocks unauthorized reads
+- [ ] Content dedup works (same content returns existing ref)
+- [ ] Filestash browses MinIO bucket, renders markdown/JSON/CSV
+- [ ] MinIO console accessible at :9001
+- [ ] Update existing tests for v2 behavior
 
-## File Plan
+## Docs
 
-```
-tests/
-  e2e/
-    helpers.sh              Shared: auth, wait, assert functions
-    e2e-1-registration.sh   Agent registration verification
-    e2e-2-invocation.sh     Paperclip-to-agent dispatch
-    e2e-3-cross-agent.sh    Cross-agent visibility
-    e2e-4-charlimit.sh      Character limit regression
-    run-e2e.sh              Runner: orchestrates all E2E tests
-```
+- [ ] Update CLAUDE.md repo layout and key context
+- [ ] Update ROADMAP.md (MinIO no longer "planned", mark as done)
+- [ ] Update ext-artifacts.md spec status or mark superseded
 
-## Prerequisites
-- Docker stack running (docker compose up)
-- Setup completed (setup.ps1 or future setup.sh)
-- curl, jq available
-- Agents healthy on :8081, :8082
-- Paperclip healthy on :3100
+---
+
+# Prior: E2E / Integration Test Suite
+
+(Moved to bottom — prior work, mostly complete)
 
 ## Status
 - [x] Plan written
@@ -64,6 +72,6 @@ tests/
 - [x] e2e-3-cross-agent.sh
 - [x] e2e-4-charlimit.sh
 - [x] run-e2e.sh
-- [ ] Playwright MCP configured (restart Claude Code to activate)
+- [ ] Playwright MCP configured
 - [ ] Run tests against live stack
-- [ ] Add Playwright browser-level tests for UI verification
+- [ ] Add Playwright browser-level tests

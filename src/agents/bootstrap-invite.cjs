@@ -1,5 +1,8 @@
 const crypto = require("crypto");
-const { Client } = require(require.resolve("pg", { paths: ["/app"] }));
+let pgPath;
+try { pgPath = require.resolve("pg", { paths: ["/app"] }); }
+catch { pgPath = require("child_process").execSync("find /app/node_modules/.pnpm -path '*/pg/lib/index.js' | head -1", { encoding: "utf8" }).trim(); }
+const { Client } = require(pgPath);
 
 const connStr = process.env.PG_CONNECTION_STRING
   || "postgres://paperclip:paperclip@127.0.0.1:54329/paperclip";

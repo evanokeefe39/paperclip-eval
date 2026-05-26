@@ -1,8 +1,8 @@
 {
   "name": "Publisher",
-  "role": "publisher",
+  "role": "cmo",
   "title": "Publishing Manager",
-  "icon": "megaphone",
+  "icon": "globe",
   "reportsTo": "CEO",
   "capabilities": "External publishing with HITL gating, social media, email, scheduling, analytics",
   "adapterType": "http",

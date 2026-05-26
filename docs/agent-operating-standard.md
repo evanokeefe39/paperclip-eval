@@ -1012,7 +1012,7 @@ networks:
 
 - Provider API keys: `.pi/agent/auth.json` (gitignored, copied from root during setup)
 - Platform credentials (Publisher): agent-specific auth, never shared
-- Paperclip auth: session-cookie based via env vars (`PAPERCLIP_ADMIN_EMAIL`, `PAPERCLIP_ADMIN_PASS`)
+- Paperclip auth: Bearer token via per-agent API key (`PAPERCLIP_API_KEY`)
 - No secrets in artifacts, logs, or Paperclip issue comments
 - No secrets in agent.json or AGENTS.md
 

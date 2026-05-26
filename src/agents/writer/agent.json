@@ -1,8 +1,8 @@
 {
   "name": "Writer",
-  "role": "writer",
+  "role": "general",
   "title": "Content Writer",
-  "icon": "pencil",
+  "icon": "message-square",
   "reportsTo": "CEO",
   "capabilities": "Transforms research into coherent narratives, applies tone and voice context, citation formatting",
   "adapterType": "http",

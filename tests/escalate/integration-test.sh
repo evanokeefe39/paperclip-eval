@@ -480,7 +480,7 @@ fi
 begin_test "Researcher container env vars set correctly"
 CONTAINER_ENV=$(docker compose -f "$REPO_ROOT/docker-compose.yml" \
     exec -T researcher node -e "
-const vars = ['PAPERCLIP_API_URL','PAPERCLIP_ADMIN_EMAIL','PAPERCLIP_ADMIN_PASS','PAPERCLIP_AGENT_ID','PAPERCLIP_COMPANY_ID'];
+const vars = ['PAPERCLIP_API_URL','PAPERCLIP_API_KEY','PAPERCLIP_AGENT_ID','PAPERCLIP_COMPANY_ID'];
 const missing = vars.filter(v => !process.env[v]);
 console.log(missing.length === 0 ? 'ALL_SET' : 'MISSING:' + missing.join(','));
 " 2>/dev/null)

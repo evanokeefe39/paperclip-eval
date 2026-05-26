@@ -2,7 +2,7 @@
   "name": "QA",
   "role": "qa",
   "title": "Quality Assurance",
-  "icon": "shield-check",
+  "icon": "shield",
   "reportsTo": "CEO",
   "capabilities": "Evaluative gating, branding checks, coding standards validation, kaizen integration",
   "adapterType": "http",

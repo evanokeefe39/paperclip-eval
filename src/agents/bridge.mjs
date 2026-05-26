@@ -10,8 +10,7 @@ const PI_MODEL = process.env.PI_MODEL || "MiniMax-M2.7";
 const BRIDGE_TIMEOUT_MS = parseInt(process.env.BRIDGE_TIMEOUT_MS, 10) || 120000;
 const VERSION = "1.1.0";
 const PAPERCLIP_API_URL = process.env.PAPERCLIP_API_URL || "";
-const PAPERCLIP_ADMIN_EMAIL = process.env.PAPERCLIP_ADMIN_EMAIL || "";
-const PAPERCLIP_ADMIN_PASS = process.env.PAPERCLIP_ADMIN_PASS || "";
+const PAPERCLIP_API_KEY = process.env.PAPERCLIP_API_KEY || "";
 const PAPERCLIP_AGENT_ID = process.env.PAPERCLIP_AGENT_ID || "";
 const PAPERCLIP_COMPANY_ID = process.env.PAPERCLIP_COMPANY_ID || "";
 
@@ -28,36 +27,16 @@ function log(level, event, data = {}) {
 
 // --- Cost reporting to Paperclip ---
 
-let costSession = null;
-
-async function ensureCostSession() {
-  if (costSession && Date.now() - costSession.ts < 20 * 60 * 1000) return costSession;
-  if (!PAPERCLIP_API_URL || !PAPERCLIP_ADMIN_EMAIL || !PAPERCLIP_ADMIN_PASS) return null;
-  try {
-    const res = await fetch(`${PAPERCLIP_API_URL}/api/auth/sign-in/email`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Origin": PAPERCLIP_API_URL },
-      body: JSON.stringify({ email: PAPERCLIP_ADMIN_EMAIL, password: PAPERCLIP_ADMIN_PASS }),
-    });
-    if (!res.ok) return null;
-    const cookie = res.headers.getSetCookie?.()?.join("; ") || "";
-    costSession = { cookie, ts: Date.now() };
-    return costSession;
-  } catch { return null; }
-}
-
 async function reportCostEvent(usage) {
-  if (!PAPERCLIP_COMPANY_ID || !PAPERCLIP_AGENT_ID) return;
+  if (!PAPERCLIP_API_KEY || !PAPERCLIP_COMPANY_ID || !PAPERCLIP_AGENT_ID) return;
   if ((usage.inputTokens + usage.outputTokens) === 0) return;
-  const session = await ensureCostSession();
-  if (!session) return;
   try {
     await fetch(`${PAPERCLIP_API_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/cost-events`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${PAPERCLIP_API_KEY}`,
         "Origin": PAPERCLIP_API_URL,
-        "Cookie": session.cookie,
       },
       body: JSON.stringify({
         agentId: PAPERCLIP_AGENT_ID,

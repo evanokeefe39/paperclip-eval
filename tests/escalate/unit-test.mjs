@@ -138,8 +138,7 @@ function stopServer() {
 async function loadExtension(envOverrides = {}) {
   const env = {
     PAPERCLIP_API_URL: `http://127.0.0.1:${serverPort}`,
-    PAPERCLIP_ADMIN_EMAIL: "test@test.local",
-    PAPERCLIP_ADMIN_PASS: "test-pass",
+    PAPERCLIP_API_KEY: "pcp_test-api-key",
     PAPERCLIP_AGENT_ID: "agent-001",
     PAPERCLIP_COMPANY_ID: "company-001",
     ...envOverrides,
@@ -309,7 +308,10 @@ describe("buildIssueBody", () => {
   });
 });
 
-describe("authenticate", () => {
+// NOTE: The authenticate tests below exercise the v1 session-cookie auth flow
+// (escalate-v1.ts, retained but disabled). The current v2 escalate.ts uses
+// PAPERCLIP_API_KEY with Bearer token auth via client.ts — no sign-in endpoint.
+describe("authenticate (v1 session-cookie pattern)", () => {
   test("successful auth returns session cookie", async () => {
     resetState();
     const session = await authenticate(
@@ -578,44 +580,39 @@ describe("urgency mapping", () => {
 });
 
 describe("environment gating", () => {
+  // Matches client.ts isConfigured(): requires PAPERCLIP_API_URL + PAPERCLIP_API_KEY.
+  // PAPERCLIP_AGENT_ID and PAPERCLIP_COMPANY_ID are resolved at call time, not at registration.
   test("all env vars present enables registration", () => {
     const required = [
-      "http://localhost:3100",
-      "admin@eval.local",
-      "pass",
-      "agent-1",
-      "company-1",
+      "http://localhost:3100",    // PAPERCLIP_API_URL
+      "pcp_test-key",             // PAPERCLIP_API_KEY
+      "agent-1",                  // PAPERCLIP_AGENT_ID
+      "company-1",                // PAPERCLIP_COMPANY_ID
     ];
     const enabled = !required.some((v) => !v);
     assert.ok(enabled);
   });
 
   test("missing API URL disables registration", () => {
-    const required = ["", "admin@eval.local", "pass", "agent-1", "company-1"];
+    const required = ["", "pcp_test-key", "agent-1", "company-1"];
+    const enabled = !required.some((v) => !v);
+    assert.ok(!enabled);
+  });
+
+  test("missing API key disables registration", () => {
+    const required = ["http://localhost:3100", "", "agent-1", "company-1"];
     const enabled = !required.some((v) => !v);
     assert.ok(!enabled);
   });
 
   test("missing agent ID disables registration", () => {
-    const required = ["http://localhost:3100", "admin@eval.local", "pass", "", "company-1"];
+    const required = ["http://localhost:3100", "pcp_test-key", "", "company-1"];
     const enabled = !required.some((v) => !v);
     assert.ok(!enabled);
   });
 
   test("missing company ID disables registration", () => {
-    const required = ["http://localhost:3100", "admin@eval.local", "pass", "agent-1", ""];
-    const enabled = !required.some((v) => !v);
-    assert.ok(!enabled);
-  });
-
-  test("missing email disables registration", () => {
-    const required = ["http://localhost:3100", "", "pass", "agent-1", "company-1"];
-    const enabled = !required.some((v) => !v);
-    assert.ok(!enabled);
-  });
-
-  test("missing password disables registration", () => {
-    const required = ["http://localhost:3100", "admin@eval.local", "", "agent-1", "company-1"];
+    const required = ["http://localhost:3100", "pcp_test-key", "agent-1", ""];
     const enabled = !required.some((v) => !v);
     assert.ok(!enabled);
   });

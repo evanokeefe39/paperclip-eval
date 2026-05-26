@@ -143,18 +143,18 @@ Paperclip runs in `authenticated` mode with `private` exposure:
 
 | Endpoint                                                    | Method | Purpose                        |
 |-------------------------------------------------------------|--------|--------------------------------|
-| /api/auth/sign-in/email                                     | POST   | Auth for cost reporting        |
+| /api/auth/sign-in/email                                     | POST   | Auth for cost reporting (admin credentials, setup-time only) |
 | /api/companies/{cid}/cost-events                            | POST   | Report token usage per run     |
 
 ## Paperclip Skills (Platform Tools for HTTP Adapter Agents)
 
 Local adapters (claude_local, pi_local) automatically receive Paperclip's MCP tools via a built-in MCP server subprocess. The HTTP adapter does not — it simply POSTs a JSON payload to the agent URL with no tool injection.
 
-To give HTTP-adapter agents the same coordination capabilities, the project includes a Pi extension at `src/agents/skills/paperclip-tools.ts` that re-implements all 40 Paperclip MCP tools as Pi-native tools. These tools wrap the Paperclip REST API using session-cookie auth.
+To give HTTP-adapter agents the same coordination capabilities, the project includes a Pi extension at `src/agents/skills/paperclip-tools.ts` that re-implements all 40 Paperclip MCP tools as Pi-native tools. These tools wrap the Paperclip REST API using Bearer token auth with per-agent API keys.
 
 ### How it works
 
-1. `skills/client.ts` exports a shared API client that authenticates via `POST /api/auth/sign-in/email` and caches the session cookie for 25 minutes
+1. `skills/client.ts` exports a shared API client that authenticates via Bearer token using the per-agent `PAPERCLIP_API_KEY` environment variable
 2. `skills/paperclip-tools.ts` is a Pi extension that registers 40 tools covering the full Paperclip API surface
 3. The bridge loads the extension via `-e /app/skills/paperclip-tools.ts` in the Pi spawn args
 4. The Dockerfile copies `skills/` into `/app/skills/` in the container image
@@ -192,12 +192,11 @@ Same as the escalate v2 extension — already configured per-container in docker
 | Variable | Purpose |
 |----------|---------|
 | PAPERCLIP_API_URL | Base URL (e.g., http://paperclip:3100) |
-| PAPERCLIP_ADMIN_EMAIL | Auth email |
-| PAPERCLIP_ADMIN_PASS | Auth password |
+| PAPERCLIP_API_KEY | Per-agent API key (Bearer token auth) |
 | PAPERCLIP_AGENT_ID | This agent's UUID (for resolveAgentId default) |
 | PAPERCLIP_COMPANY_ID | Company UUID (for resolveCompanyId default) |
 
-If any of the three auth vars (URL, email, password) are missing, the extension silently skips registration.
+If PAPERCLIP_API_URL or PAPERCLIP_API_KEY is missing, the extension silently skips registration.
 
 ### Testing
 
@@ -239,7 +238,7 @@ The execute endpoint accepts a JSON body:
 
 The tool name is prefixed with the plugin's UUID and a colon. The `runContext` provides the calling agent's identity and current issue so the plugin can act on behalf of that agent.
 
-In this project, the `skills/client.ts` shared API client handles authentication for these calls using the same session-cookie mechanism used by the Paperclip skills extension.
+In this project, the `skills/client.ts` shared API client handles authentication for these calls using the same Bearer token mechanism used by the Paperclip skills extension.
 
 ## Discord Plugin
 
@@ -306,8 +305,7 @@ Both backends use the shared `skills/client.ts` API client for authentication. T
 |----------|---------|
 | PAPERCLIP_DISCORD_PLUGIN_ID | Plugin UUID; presence selects Discord backend |
 | PAPERCLIP_API_URL | Base URL for API calls |
-| PAPERCLIP_ADMIN_EMAIL | Auth email |
-| PAPERCLIP_ADMIN_PASS | Auth password |
+| PAPERCLIP_API_KEY | Per-agent API key (Bearer token auth) |
 | PAPERCLIP_AGENT_ID | Calling agent's UUID |
 | PAPERCLIP_COMPANY_ID | Company UUID |
 

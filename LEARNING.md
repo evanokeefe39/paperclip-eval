@@ -117,7 +117,7 @@ Use the GHCR image instead of cloning and building from source. Avoids needing t
 
 The server starts fine from env vars alone — no config.json needed for the server process. However, the `paperclipai` CLI (used for bootstrap-ceo, configure, doctor) requires a valid `config.json` at `$PAPERCLIP_HOME/instances/default/config.json`. The schema requires `$meta.version`, `$meta.updatedAt`, `$meta.source` (enum: `onboard`, `configure`, `doctor`), and `server.bind` (enum: `loopback`, `lan`, `tailnet`, `custom`).
 
-A template config is kept at `src/agents/paperclip-config.json` and copied into the container via `docker cp` when needed.
+A template config is kept at `src/agents/paperclip-config.json` and piped into the container via `cat | docker exec` during setup.
 
 ---
 
@@ -737,3 +737,58 @@ T3 EMPTY/BLOCK → T4 Apify (DataDome, aggressive PerimeterX, SPAs)
 - Campaign plan: `tasks/plans/real-world-scrape-campaign.md`
 - Test runner: `tests/scraping/real-world-tests.sh`
 - Results: `tests/results/real-world-campaign-20260526.md`
+
+---
+
+## 2026-05-26 — setup.sh on Windows: resolved issues and patterns
+
+### WSL env var pass-through
+
+`SKIP_BUILD=1 wsl bash src/agents/setup.sh` does not propagate env vars into WSL. Fixed by adding `--skip-build` CLI flag to setup.sh and forwarding args from setup.ps1.
+
+### auth.json symlinks vs Docker build context
+
+Agent dirs used symlinks (`auth.json -> ../../../../../auth.json`) pointing outside the Docker build context (`src/agents/`). Docker cannot follow symlinks that escape the context. Previously worked only because layers were cached.
+
+**Fix**: setup.sh `copy_auth_json` function copies the real file into each agent dir before building. Both symlinks and copies are gitignored.
+
+### Git Bash MSYS path mangling
+
+MSYS translates Unix-style paths into Windows paths. `MSYS_NO_PATHCONV=1` helps for `docker exec` args but doesn't fix `docker cp` (the `container:/path` syntax gets mangled) or `pwd` output (returns `/c/Users/...` which native tools like jq can't read).
+
+Fixes applied:
+- `docker cp` replaced with `cat file | dc exec -T container sh -c 'cat > /path'` — avoids `container:/path` syntax entirely
+- `SCRIPT_DIR`/`REPO_ROOT` use `cygpath -w` when available (Git Bash) to produce Windows paths for native tools
+- `dc()` helper does `(cd "$REPO_ROOT" && docker compose ...)` to avoid `-f` path issues
+- Health check uses `dc exec -T paperclip node -e '...'` instead of host-side `curl` (avoids localhost DNS resolution differences)
+- Default `PAPERCLIP_URL` uses `127.0.0.1` instead of `localhost` (bypasses DNS for remaining curl calls)
+
+### Paperclip agent registration enum validation
+
+Paperclip validates `role` and `icon` against fixed enums. Custom values rejected with 422.
+
+Valid roles: `ceo`, `cto`, `cmo`, `cfo`, `security`, `engineer`, `designer`, `pm`, `qa`, `devops`, `researcher`, `general`
+
+Valid icons: `bot`, `cpu`, `brain`, `zap`, `rocket`, `code`, `terminal`, `shield`, `eye`, `search`, `wrench`, `hammer`, `lightbulb`, `sparkles`, `star`, `heart`, `flame`, `bug`, `cog`, `database`, `globe`, `lock`, `mail`, `message-square`, `file-code`, `git-branch`, `package`, `puzzle`, `target`, `wand`, `atom`, `circuit-board`, `radar`, `swords`, `telescope`, `microscope`, `crown`, `gem`, `hexagon`, `pentagon`, `fingerprint`
+
+Mapping: Data → `engineer`, Writer → `general`, Coder → `engineer`. Writer icon `pencil` → `message-square`. QA icon `shield-check` → `shield`.
+
+### bootstrap-invite.cjs pnpm compatibility
+
+Paperclip switched to pnpm, so `require.resolve("pg", { paths: ["/app"] })` no longer works — pg is nested under `.pnpm/`. Fixed with a fallback that finds the module via `find`.
+
+### Docker Compose project name and volumes
+
+Docker Compose derives project name from directory name. Renaming the repo caused stale containers (port conflicts) and orphaned volumes (data loss). Fixed by pinning `name: paperclip-eval` in docker-compose.yml and giving all volumes explicit names (`paperclip-eval-data`, etc.).
+
+### Stale API keys on fresh instance
+
+setup.sh skipped API key creation if any `pcp_` key existed in the agent `.env` file — even if the Paperclip instance was fresh (new volume). Keys from a previous instance are invalid. Fixed by only skipping key creation when the agent already exists in the *current* instance (checked via `EXISTING_FLAGS`).
+
+### PAPERCLIP_PUBLIC_URL origin validation
+
+Paperclip's auth (Better Auth) validates browser request origins against `PAPERCLIP_PUBLIC_URL`. Setting it to the Docker-internal hostname (`http://paperclip:3100`) causes "Invalid origin" errors in the browser. Must be set to `http://localhost:3100` to match browser origin.
+
+### Remaining open issues
+
+See `tasks/issues/` — `yelp-selectors-stale.md` and `t4-apify-untested.md`.

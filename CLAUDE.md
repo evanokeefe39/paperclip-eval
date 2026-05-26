@@ -8,6 +8,7 @@ Evaluation repo for running Paperclip agent orchestration with Pi agents via Doc
 
 ```
 docker-compose.yml          Full stack: Paperclip + agent containers (healthcheck on Paperclip)
+.env.example                Template for shared provider API keys and bridge defaults
 artifacts/                  Shared agent artifact storage (bind-mounted into containers at /artifacts)
 src/agents/
   bridge.mjs               HTTP-to-RPC bridge shim (Node, zero deps)
@@ -17,7 +18,6 @@ src/agents/
   bootstrap-invite.cjs      DB-level bootstrap invite creator (idempotent, bypasses CLI)
   paperclip-config.json     Config template for Paperclip CLI compatibility
   .dockerignore             Excludes .env and non-build files from image context
-  .env.example              Template for provider API keys
   extensions/               Pi extensions loaded into all agent containers
     web-search.ts           Exa-backed web search tool (registered as web_search)
     web-fetch.ts            URL fetch tool with Jina Reader fallback (registered as web_fetch)
@@ -54,7 +54,7 @@ src/agents/
     agent.json              Agent registration metadata (name, role, adapter config)
     .pi/agent/config.yml
     .pi/agent/models.json
-    .pi/agent/auth.json     Provider auth (gitignored, copy from root auth.json)
+    .pi/agent/auth.json     Provider auth (gitignored, symlink to root auth.json)
     AGENTS.md
   researcher/               Researcher agent config and prompt
     (same structure as ceo/)
@@ -66,7 +66,7 @@ src/agents/
     (same structure as ceo/)
   qa/                       QA agent config and prompt
     (same structure as ceo/)
-auth.json                    Master auth file — copy into agent .pi/agent/ dirs
+auth.json                    Master auth file — symlinked into agent .pi/agent/ dirs
 scripts/backup.sh            Backup Paperclip instance (bash/WSL)
 scripts/wipe.sh              Wipe and reset Paperclip instance (bash/WSL)
 tests/                       Hurl, k6, and fixture-based test suite
@@ -93,26 +93,30 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 
 - Everything runs in Docker via docker-compose (Paperclip + agent bridges)
 - Paperclip image: ghcr.io/paperclipai/paperclip:latest (authenticated mode)
-- Paperclip UI at http://localhost:3100, agents at :8081, :8082
+- Paperclip UI at http://localhost:3100, agents at :8081 (CEO), :8082 (Researcher), :8083 (Data), :8084 (Writer)
 - On Docker network: Paperclip reaches agents at http://ceo:8080, http://researcher:8080
 - Agents registered via HTTP adapter, not pi_local (bypasses CLI arg length limit)
 - Pi runs in RPC mode inside containers — JSONL over stdin/stdout
 - bridge.mjs translates between HTTP POST and Pi's JSONL protocol
 - Pi requires auth.json at ~/.pi/agent/auth.json inside containers (provider-specific structure for minimax/deepseek)
-- First-time setup: run setup.sh (or setup.ps1 from PowerShell, which delegates to setup.sh via WSL). Subsequent starts: docker compose up -d
-- setup.sh is idempotent — safe to re-run. Skips existing companies/agents and prints their IDs
+- First-time setup: `bash src/agents/setup.sh` (works from Git Bash, WSL, or PowerShell via `setup.ps1`). Subsequent starts: `docker compose up -d`
+- Docker Compose project name pinned to `paperclip-eval` via `name:` key — safe to rename/move the repo directory
+- setup.sh is idempotent — safe to re-run. Skips existing companies/agents, creates API keys, writes per-agent `.env` files
 - All setup config via env vars: PAPERCLIP_URL, ADMIN_EMAIL, ADMIN_PASS, COMPANY_NAME, COMPOSE_FILE, SKIP_BUILD
 - Adding a new agent: create a directory with .pi/agent/config.yml and agent.json, then re-run setup.sh
+- Per-agent config in `src/agents/{name}/.env` — Paperclip credentials (API key, agent ID, company ID) plus agent-specific overrides (PI_PROVIDER, BRIDGE_TIMEOUT_MS, etc.)
+- docker-compose loads both root `.env` (shared API keys) and per-agent `.env` (Paperclip identity + overrides)
+- Agent API keys created automatically by setup.sh via `POST /api/agents/{id}/keys`, tokens prefixed `pcp_`
 
 ## Paperclip skills (platform tools)
 
 - HTTP adapter agents don't receive Paperclip's built-in MCP tools — those are only injected for local adapters (claude_local, codex_local, pi_local)
 - `src/agents/skills/paperclip-tools.ts` is a Pi extension that re-implements all 40 Paperclip MCP tools as Pi-native tools wrapping the REST API
-- Shared client at `src/agents/skills/client.ts` handles session-cookie auth with 25-minute cache
+- Shared client at `src/agents/skills/client.ts` uses per-agent API key auth (`Authorization: Bearer <PAPERCLIP_API_KEY>`)
 - Tools cover: issues (CRUD, checkout, release), comments, documents, projects, goals, agents/inbox, interactions (suggest_tasks, ask_user_questions, request_confirmation), approvals (full lifecycle), workspace runtime, and an escape-hatch `paperclip_api_request` for anything not covered
 - Loaded in bridge.mjs via `-e /app/skills/paperclip-tools.ts`, copied into container by Dockerfile
-- Requires same env vars as escalate: `PAPERCLIP_API_URL`, `PAPERCLIP_ADMIN_EMAIL`, `PAPERCLIP_ADMIN_PASS`, `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`
-- If any of the three auth env vars are missing, the extension silently skips registration (no crash)
+- Requires env vars: `PAPERCLIP_API_URL`, `PAPERCLIP_API_KEY`, `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID` (all in per-agent `.env`)
+- If PAPERCLIP_API_URL or PAPERCLIP_API_KEY is missing, the extension silently skips registration (no crash)
 - API paths match the upstream MCP server at `packages/mcp-server/src/tools.ts` — all paths relative to `/api`
 - Tests: `node tests/paperclip-tools/unit-test.mjs` (162 tests, fake server) and `bash tests/paperclip-tools/integration-test.sh` (live stack)
 

@@ -129,7 +129,7 @@ Pi extensions are TypeScript files loaded via `-e` flags at spawn time. They reg
 ```
 /app/extensions/             Custom tools (web search, fetch, escalate, etc.)
 /app/skills/                 Paperclip platform tools (REST API wrappers)
-  client.ts                  Shared auth client — session cookie with 25-min cache
+  client.ts                  Shared auth client — Bearer token auth via per-agent API key
   paperclip-tools.ts         40 tools matching upstream MCP server (issues, comments,
                              documents, agents, projects, goals, interactions, approvals,
                              workspace runtime, escape hatch)
@@ -146,7 +146,7 @@ The `escalate.ts` extension registers a single `escalate` tool that presents a u
 - Discord mode: when `PAPERCLIP_DISCORD_PLUGIN_ID` is set, the tool calls `POST /api/plugins/tools/execute` with `{pluginId}:escalate_to_human`. The plugin posts an interactive Discord embed with buttons. Human responses flow back through Discord threads into Paperclip issue comments.
 - Local mode: when the env var is absent, the tool creates a Paperclip issue with an `escalation` label and attaches either a `request_confirmation` or `ask_user_questions` interaction (depending on whether the agent supplied structured inputs). The agent is paused and waits for human response in the Paperclip UI.
 
-Both paths use the shared `skills/client.ts` for session-cookie auth. The old v1 implementation is preserved as `escalate-v1.ts`.
+Both paths use the shared `skills/client.ts` for Bearer token auth via per-agent API key. The old v1 implementation is preserved as `escalate-v1.ts`.
 
 ### Deep Research Module
 

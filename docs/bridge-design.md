@@ -145,7 +145,7 @@ Response JSON includes `trace_id` for external correlation with Paperclip issues
 
 Bridge extracts token usage from Pi's `turn_end` JSONL events (fields: `usage.input`, `usage.output`, `usage.cacheRead`, `provider`, `model`). Aggregates across all turns per request.
 
-After Pi completes, POSTs to Paperclip's cost-events API: `POST /api/companies/{companyId}/cost-events` with `agentId`, `provider`, `model`, `inputTokens`, `outputTokens`, `cachedInputTokens`. Session-cookie auth (same pattern as escalate extension).
+After Pi completes, POSTs to Paperclip's cost-events API: `POST /api/companies/{companyId}/cost-events` with `agentId`, `provider`, `model`, `inputTokens`, `outputTokens`, `cachedInputTokens`. Bearer token auth via per-agent `PAPERCLIP_API_KEY`.
 
 Fire-and-forget — cost reporting failure does not affect the /invoke response. Skips POST when total tokens is zero (e.g. MiniMax which returns all-zero usage).
 
