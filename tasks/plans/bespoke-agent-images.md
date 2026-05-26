@@ -1,8 +1,8 @@
-# Bespoke Agent Images + Scraping Test Spike
+# Bespoke Agent Images + Scraping Tests
 
 ## Intent
 
-Establish the pattern for agents that need custom Docker images beyond the shared base. First use case: a data/researcher agent that needs Python + Scrapling for anti-detection scraping. Includes a spike to verify Pi extensions can spawn subprocesses (Python from TypeScript), and rigorous test specs for all scraping tiers invokable via Pi JSON mode locally.
+Establish the pattern for agents that need custom Docker images beyond the shared base. No gateway — each agent carries the dependencies it needs. First use case: scraping agent with tiers from lightweight (cheerio, in-process) through heavy (Playwright + Chromium, 1GB+ image). Includes subprocess spike (Python from TS extension) and rigorous Pi JSON mode test specs for all four scraping tiers.
 
 ## Context Package
 
@@ -11,7 +11,7 @@ Establish the pattern for agents that need custom Docker images beyond the share
 - `src/agents/Dockerfile` — shared base image (node:22-slim + Pi CLI + git)
 - `src/agents/docker-compose.yml` — YAML anchor `x-agent` defines shared agent config, each service overrides `AGENT_NAME` build arg
 - `src/agents/bridge.mjs` — spawns Pi in RPC mode, loads extensions via `-e` flags
-- `src/agents/extensions/web-fetch.ts` — existing extension, uses `fetch()` and Jina Reader. Pure TS, no subprocess.
+- `src/agents/extensions/web-fetch.ts` — existing extension, uses `fetch()` and Jina Reader. Pure TS.
 - `src/agents/extensions/web-search.ts` — existing extension, calls Exa API. Pure TS.
 - `src/agents/extensions/escalate.ts` — existing extension, calls Paperclip API. Pure TS.
 - `src/agents/extensions/web-scrape.ts` — empty placeholder
@@ -29,28 +29,34 @@ Establish the pattern for agents that need custom Docker images beyond the share
 - HTTP adapter over pi_local (CLI arg length limit)
 - Extensions over MCP tools (simpler, in-process)
 - Shared artifacts via Docker volume at /artifacts
+- No gateway — killed. Agents carry their own deps. No docker-in-docker.
 
 ### Anti-patterns to avoid
 
+- Gateway / docker-in-docker / ephemeral container spawning (eliminated)
 - Bloating base image with deps only one agent needs
-- Gateway/docker-in-docker for things that can run in-process
-- Installing full browser stack when HTTP-only scraping suffices
+- Assuming all agents can share one image forever
 
 ## Part 1: Bespoke Image Pattern
+
+### The problem
+
+Today every agent uses the same Dockerfile. Works when all agents need the same stack (Node + Pi). Breaks when one agent needs Python, another needs Chromium, a third needs ffmpeg. The base image shouldn't carry everyone's dependencies.
 
 ### Directory convention
 
 ```
 src/agents/
   Dockerfile                  # base image — all agents inherit unless overridden
+  Dockerfile.base             # FUTURE: named build stage for multi-stage (not yet)
   {agent-name}/
-    Dockerfile                # OPTIONAL — bespoke image for this agent
+    Dockerfile                # OPTIONAL — bespoke image, overrides base for this agent
     agent.json
     .pi/agent/...
-    extensions/               # OPTIONAL — agent-specific extensions (not shared)
+    scripts/                  # OPTIONAL — helper scripts (e.g. Python scraping workers)
 ```
 
-When `src/agents/{agent-name}/Dockerfile` exists, docker-compose uses it. Otherwise falls back to base.
+When `src/agents/{agent-name}/Dockerfile` exists, docker-compose points to it. Otherwise uses shared base.
 
 ### docker-compose pattern
 
@@ -59,14 +65,19 @@ x-agent: &agent
   build:
     context: .
     dockerfile: Dockerfile    # base default
-  # ... shared config ...
+  restart: unless-stopped
+  env_file: .env
+  deploy:
+    resources:
+      limits:
+        memory: 512M
 
 services:
   ceo:
     <<: *agent
     build:
       context: .
-      dockerfile: Dockerfile  # uses base — no bespoke image needed
+      dockerfile: Dockerfile        # no override — uses base
       args:
         AGENT_NAME: ceo
 
@@ -74,30 +85,55 @@ services:
     <<: *agent
     build:
       context: .
-      dockerfile: researcher/Dockerfile  # bespoke — has python + scrapling
+      dockerfile: researcher/Dockerfile   # bespoke: python + scrapling (lightweight)
       args:
         AGENT_NAME: researcher
+
+  data-agent:
+    <<: *agent
+    build:
+      context: .
+      dockerfile: data-agent/Dockerfile   # bespoke: python + scrapling[fetchers] + playwright + chromium (heavy)
+      args:
+        AGENT_NAME: data-agent
+    deploy:
+      resources:
+        limits:
+          memory: 2G                      # heavy image needs more RAM for browser
 ```
 
-### Bespoke Dockerfile template
+### Image size tiers
+
+| Image type | Example agent | Added deps | Approx. size delta |
+|-----------|--------------|-----------|-------------------|
+| Base | CEO | none | 0 (baseline ~300MB) |
+| Lightweight bespoke | Researcher | python3 + scrapling (Fetcher only) | +80MB |
+| Heavy bespoke | Data agent | python3 + scrapling[fetchers] + playwright + chromium | +1.2GB |
+
+The heavy image is the whole point of this pattern — prove it works, document the tradeoffs, establish conventions so future agents can follow.
+
+### Lightweight bespoke Dockerfile (Tier 1-2: Cheerio + Scrapling Fetcher)
 
 ```dockerfile
 # src/agents/researcher/Dockerfile
-# Extends base agent with Python + Scrapling for anti-detection scraping
+# Base agent + Python + Scrapling (HTTP-only, no browser)
 
-FROM node:22-slim AS base
+FROM node:22-slim
 
-# --- Base agent setup (same as shared Dockerfile) ---
+# --- Base agent deps ---
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
-# --- Bespoke: Python + Scrapling ---
+# --- Bespoke: Python + Scrapling (Fetcher class only, no browser) ---
 RUN apt-get update && \
     apt-get install -y --no-install-recommends python3 python3-pip && \
     rm -rf /var/lib/apt/lists/*
 RUN pip3 install --break-system-packages scrapling
 
-# --- Agent setup (same pattern as base) ---
+# --- Bespoke: Cheerio for in-process HTML parsing ---
+RUN npm install -g cheerio
+
+# --- Standard agent setup ---
 ARG AGENT_NAME
 WORKDIR /app
 
@@ -108,6 +144,8 @@ COPY ${AGENT_NAME}/.pi/agent/models.json /root/.pi/agent/models.json
 COPY ${AGENT_NAME}/.pi/agent/settings.json /root/.pi/agent/settings.json
 COPY ${AGENT_NAME}/.pi/agent/auth.json /root/.pi/agent/auth.json
 COPY ${AGENT_NAME}/AGENTS.md /app/AGENTS.md
+# Copy agent-specific scripts if present
+COPY ${AGENT_NAME}/scripts/ /app/scripts/
 
 RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents || true
 RUN mkdir -p /workspace
@@ -120,21 +158,97 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
 CMD ["node", "bridge.mjs"]
 ```
 
-### Multi-stage optimization (future)
-
-When multiple agents share the base, use a named stage:
+### Heavy bespoke Dockerfile (Tier 3: Playwright + Chromium)
 
 ```dockerfile
+# src/agents/data-agent/Dockerfile
+# Full scraping agent: Cheerio + Scrapling + Playwright + Chromium
+# WARNING: ~1.5GB image. Only for agents that need JS rendering.
+
+FROM node:22-slim
+
+# --- Base agent deps ---
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+
+# --- Python + Scrapling (full install with browser fetchers) ---
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      python3 python3-pip \
+      # Playwright system deps (Chromium needs these)
+      libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+      libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+      libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 \
+      libcairo2 libasound2 libxshmfence1 \
+      # Fonts for rendering
+      fonts-liberation fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --break-system-packages "scrapling[fetchers]"
+# Downloads Camoufox (patched Firefox) + Playwright browsers
+RUN scrapling install
+
+# --- Cheerio for lightweight in-process parsing ---
+RUN npm install -g cheerio
+
+# --- Node Playwright as alternative to Python Playwright ---
+RUN npx playwright install chromium
+
+# --- Standard agent setup ---
+ARG AGENT_NAME
+WORKDIR /app
+
+COPY bridge.mjs .
+COPY extensions/ /app/extensions/
+COPY ${AGENT_NAME}/.pi/agent/config.yml /root/.pi/agent/config.yml
+COPY ${AGENT_NAME}/.pi/agent/models.json /root/.pi/agent/models.json
+COPY ${AGENT_NAME}/.pi/agent/settings.json /root/.pi/agent/settings.json
+COPY ${AGENT_NAME}/.pi/agent/auth.json /root/.pi/agent/auth.json
+COPY ${AGENT_NAME}/AGENTS.md /app/AGENTS.md
+COPY ${AGENT_NAME}/scripts/ /app/scripts/
+
+RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents || true
+RUN mkdir -p /workspace
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://localhost:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+
+CMD ["node", "bridge.mjs"]
+```
+
+### Build time expectations
+
+| Image | Cold build | Cached rebuild (code change only) |
+|-------|-----------|----------------------------------|
+| Base | ~45s | ~5s |
+| Lightweight bespoke | ~90s | ~5s |
+| Heavy bespoke | ~5-8 min | ~5s (if only COPY layers change) |
+
+Heavy image build is slow but cached. Day-to-day code changes only hit COPY layers at the bottom, so rebuilds stay fast after first pull.
+
+### Convention rules
+
+1. Bespoke Dockerfile MUST replicate the base agent setup section (COPY bridge.mjs, extensions, config, HEALTHCHECK, CMD). No inheritance from base Dockerfile — each is self-contained.
+2. Bespoke Dockerfile SHOULD group deps by purpose with comments.
+3. Heavy deps (browsers, ML models) go early in Dockerfile for better layer caching.
+4. Agent-specific scripts live in `{agent-name}/scripts/`, copied to `/app/scripts/`.
+5. docker-compose memory limit MUST increase for heavy images (2G minimum for browser agents).
+6. `.dockerignore` applies to build context (src/agents/), not per-agent. Agent dirs shouldn't contain large non-build files.
+
+### Multi-stage optimization (future, not now)
+
+When 3+ agents share the base layer, extract to a named stage:
+
+```dockerfile
+# Dockerfile.base
 FROM node:22-slim AS agent-base
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 ```
 
-Then bespoke images: `FROM agent-base AS researcher`. Not needed for eval — two agents don't justify the complexity. Document for when agent count grows.
-
-### setup.sh changes
-
-setup.sh currently does `docker compose build`. No changes needed — docker-compose already resolves per-service `dockerfile` paths. Just needs to be aware that build times vary by agent.
+Then bespoke images: `FROM agent-base`. Not needed for eval — two or three agents don't justify the indirection. Documented here so the pattern is known when agent count grows.
 
 ## Part 2: Subprocess Spike — Python from Pi Extension
 
@@ -142,7 +256,7 @@ setup.sh currently does `docker compose build`. No changes needed — docker-com
 
 Can a Pi extension's `execute()` function call `child_process.spawn()` to run a Python script and collect stdout?
 
-### Spike test
+### Spike test extension
 
 ```typescript
 // src/agents/extensions/spike-subprocess.ts
@@ -162,6 +276,7 @@ export default function (pi: ExtensionAPI) {
       const result = execFileSync("python3", ["-c", params.code], {
         encoding: "utf-8",
         timeout: 10_000,
+        maxBuffer: 5 * 1024 * 1024,
       });
       return {
         content: [{ type: "text" as const, text: result }],
@@ -174,8 +289,8 @@ export default function (pi: ExtensionAPI) {
 ### How to run spike
 
 ```bash
-# Inside researcher container (bespoke image with python3):
-pi --mode json \
+# Inside bespoke container (must have python3):
+docker exec researcher pi --mode json \
   -e /app/extensions/spike-subprocess.ts \
   -p "Use the spike_python tool to run: print('hello from python')"
 ```
@@ -209,30 +324,85 @@ pi --mode json \
 
 If Pi sandboxes `child_process`:
 - Alternative A: Write params to temp file, have bridge.mjs run Python before/after Pi (loses tool-call integration)
-- Alternative B: Scrapling HTTP microservice as sidecar container (like current gateway plan but simpler — single `flask`/`fastapi` endpoint)
-- Alternative C: Use scrapling's Fetcher via its HTTP mode if available
+- Alternative B: Scrapling HTTP microservice as sidecar container (tiny Flask/FastAPI app, separate service in docker-compose)
+- Alternative C: Use Node's Playwright directly (skip Python for tier 3)
 
 Decision deferred until spike result known.
 
-## Part 3: Scraping Extension Architecture (Post-Spike)
+## Part 3: Scraping Extension Architecture
 
-Assuming subprocess works, the scraping extension registers three tools that run in-process or via subprocess:
+No gateway. Each tool runs inside the agent's own container via in-process code or subprocess.
 
-| Tool | Runtime | Dependency |
-|------|---------|-----------|
-| `scrape_static` | Node (in-process) | cheerio (npm, install in Dockerfile) |
-| `scrape_stealth` | Python subprocess | scrapling Fetcher (pip, bespoke image) |
-| `scrape_browser` | Python subprocess | scrapling PlayWrightFetcher OR Crawlee (heavy image) |
+### Tool → runtime mapping
 
-Tier 3 (browser) has two options:
-- A: `scrapling[fetchers]` with `scrapling install` (downloads Camoufox/Playwright — huge image, 1GB+)
-- B: Separate Playwright container via gateway (keeps agent image small)
+| Tool | Tier | Runtime | Dependency | Image type |
+|------|------|---------|-----------|-----------|
+| `scrape_static` | 1 | Node in-process | cheerio (npm) | Lightweight bespoke |
+| `scrape_stealth` | 2 | Python subprocess | scrapling Fetcher (pip) | Lightweight bespoke |
+| `scrape_browser` | 3 | Python subprocess | scrapling PlayWrightFetcher (pip + browsers) | Heavy bespoke |
+| `scrape_apify` | 4 | Node in-process (fetch) | none — HTTP API calls | Any image |
+| `list_actors` | 4 | Node in-process (fetch) | none — HTTP API calls | Any image |
+| `scrape_status` | 4 | Node in-process (fetch) | none — HTTP API calls | Any image |
 
-For eval: start with tiers 1-2 only. Tier 3 deferred — most scraping tasks don't need JS rendering.
+### How subprocess tools work
+
+Extension `execute()` calls `execFileSync("python3", ["/app/scripts/scrape_stealth.py", JSON.stringify(params)])`. Python script writes JSON to stdout. Extension parses it, returns as tool result.
+
+```
+Pi extension execute()
+  │ execFileSync("python3", ["script.py", paramsJson])
+  ▼
+Python script
+  │ parse params from argv
+  │ scrapling.Fetcher().get(url) or PlayWrightFetcher().get(url)
+  │ extract data
+  │ print(json.dumps(result))
+  ▼
+Extension parses stdout JSON → returns tool_result
+```
+
+### Python worker scripts
+
+Live in `{agent-name}/scripts/`, copied to `/app/scripts/` in Docker build.
+
+```
+src/agents/researcher/scripts/
+  scrape_stealth.py         # Tier 2: Scrapling Fetcher (HTTP-only)
+
+src/agents/data-agent/scripts/
+  scrape_stealth.py         # Tier 2: same script
+  scrape_browser.py         # Tier 3: Scrapling PlayWrightFetcher (browser)
+```
+
+### Shared input/output contract for Python workers
+
+Input: JSON string as first CLI argument.
+
+```json
+{
+  "url": "https://example.com",
+  "selector": ".product",
+  "extract_fields": {"name": ".name", "price": ".price"},
+  "pagination": {"next_selector": ".next", "max_pages": 3},
+  "max_items": 100,
+  "wait_for": ".dynamic-content"
+}
+```
+
+Output: JSON to stdout.
+
+```json
+{
+  "items": [{"name": "Widget A", "price": "$19.99"}],
+  "pages_crawled": 1,
+  "duration_ms": 1200,
+  "errors": []
+}
+```
 
 ## Part 4: Test Specifications
 
-All tests invoke Pi locally with `--mode json` and assert on JSONL output. Tests run against the agent container (bespoke image) to validate the full path: Pi → extension → tool execution → result.
+All tests invoke Pi locally with `--mode json` and assert on JSONL output. Tests run against agent containers (bespoke images) to validate the full path: Pi → extension → tool execution (in-process or subprocess) → result.
 
 ### Test infrastructure
 
@@ -243,9 +413,12 @@ tests/
     fixtures/
       static-server.mjs       # Node HTTP server serving test HTML pages
       static-page.html        # Simple page with known structure
-      paginated/              # Multi-page fixture (page1.html, page2.html)
-      js-rendered.html        # Page where content requires JS (for tier 3 future)
-      blocked-page.html       # Returns 403 to non-stealth requests
+      paginated/
+        page1.html            # Page 1 with next link
+        page2.html            # Page 2 (terminal)
+      js-rendered.html        # Page where content only appears after JS execution
+      blocked-page.html       # Returns 403 to non-stealth User-Agents
+      large-page.html         # 500+ items for output size testing
     expected/
       static-extract.json     # Expected output from static page scrape
       paginated-extract.json  # Expected output from paginated scrape
@@ -257,25 +430,53 @@ tests/
 // tests/scraping/fixtures/static-server.mjs
 import { createServer } from "http";
 import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+const __dir = dirname(fileURLToPath(import.meta.url));
+const read = (f) => readFileSync(join(__dir, f), "utf-8");
+
+// Generate large page with 500 items
+function generateLargePage() {
+  const items = Array.from({ length: 500 }, (_, i) =>
+    `<div class="row"><span class="id">${i + 1}</span><span class="val">Item ${i + 1}</span></div>`
+  ).join("\n");
+  return `<html><body>${items}</body></html>`;
+}
+
+// JS-rendered page: content injected by inline script
+const jsRendered = `<html><body>
+  <div id="app">Loading...</div>
+  <script>
+    setTimeout(() => {
+      document.getElementById("app").innerHTML =
+        '<div class="dynamic"><h2 class="title">Dynamic Content</h2><p class="body">Rendered by JS</p></div>';
+    }, 500);
+  </script>
+</body></html>`;
 
 const pages = {
-  "/": readFileSync("static-page.html", "utf-8"),
-  "/page1": readFileSync("paginated/page1.html", "utf-8"),
-  "/page2": readFileSync("paginated/page2.html", "utf-8"),
-  "/blocked": null,  // returns 403
+  "/":      read("static-page.html"),
+  "/page1": read("paginated/page1.html"),
+  "/page2": read("paginated/page2.html"),
+  "/large": generateLargePage(),
+  "/js":    jsRendered,
 };
 
 createServer((req, res) => {
+  // /blocked: reject non-browser User-Agents
   if (req.url === "/blocked") {
     const ua = req.headers["user-agent"] || "";
-    // Block requests without realistic browser fingerprint
-    if (!ua.includes("Mozilla")) {
+    if (!ua.includes("Mozilla") || ua.includes("node-fetch") || ua.includes("undici")) {
       res.writeHead(403);
-      return res.end("Forbidden");
+      return res.end("Forbidden: bot detected");
     }
+    res.writeHead(200, { "Content-Type": "text/html" });
+    return res.end("<html><body><div class='content'>Secret content behind bot protection</div></body></html>");
   }
+
   const html = pages[req.url];
-  if (!html) { res.writeHead(404); return res.end(); }
+  if (!html) { res.writeHead(404); return res.end("Not found"); }
   res.writeHead(200, { "Content-Type": "text/html" });
   res.end(html);
 }).listen(9999, () => console.log("Fixture server on :9999"));
@@ -323,7 +524,7 @@ createServer((req, res) => {
 
 ### 4.1 Spike Tests — Subprocess Verification
 
-Run inside bespoke container. These must pass before any scraping tests.
+Run inside bespoke container. Gate: must pass before any scraping tests.
 
 ```bash
 # TEST S.1: Python3 available in container
@@ -350,14 +551,51 @@ docker exec researcher pi --mode json \
 # ASSERT: Process exits within 15 seconds
 ```
 
-### 4.2 Tier 1 Tests — Cheerio (Static HTML, In-Process)
+### 4.2 Heavy Image Spike Tests — Browser Dependencies
+
+Run inside heavy bespoke container. Validates the large image built correctly and browser deps work.
 
 ```bash
-# Start fixture server on host (accessible from container via host.docker.internal)
+# TEST H.1: Scrapling full install available
+docker exec data-agent python3 -c "from scrapling import PlayWrightFetcher; print('ok')"
+# ASSERT: exit 0, output "ok"
+
+# TEST H.2: Chromium binary present
+docker exec data-agent python3 -c "
+from scrapling import PlayWrightFetcher
+f = PlayWrightFetcher()
+# Just verify it can instantiate — don't fetch anything
+print('playwright ready')
+"
+# ASSERT: exit 0, output "playwright ready"
+# NOTE: May take a few seconds on first run (browser startup)
+
+# TEST H.3: Node Playwright available (alternative to Python)
+docker exec data-agent npx playwright --version
+# ASSERT: exit 0, version string
+
+# TEST H.4: Container memory under limit
+docker stats --no-stream --format '{{.MemUsage}}' data-agent
+# ASSERT: idle memory < 500MB (Chromium not running until scrape requested)
+
+# TEST H.5: Image size sanity
+docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}' | grep data-agent
+# ASSERT: size between 1GB and 2.5GB (sanity bounds — not 5GB, not 200MB)
+
+# TEST H.6: Build caching — code-only change is fast
+# Modify bridge.mjs (touch a comment), rebuild:
+time docker compose build data-agent
+# ASSERT: rebuild < 30s (only COPY layers rerun, heavy deps cached)
+```
+
+### 4.3 Tier 1 Tests — Cheerio (Static HTML, In-Process Node)
+
+```bash
+# Prerequisite: fixture server running on host
 node tests/scraping/fixtures/static-server.mjs &
 FIXTURE_PID=$!
 
-# TEST T1.1: Basic extraction — CSS selector, extract_fields
+# TEST T1.1: Basic extraction — CSS selector + extract_fields
 docker exec researcher pi --mode json \
   -e /app/extensions/web-scrape.ts \
   -p 'Use scrape_static to scrape http://host.docker.internal:9999/ with selector ".product" and extract fields: name from ".name", price from ".price"'
@@ -369,7 +607,7 @@ docker exec researcher pi --mode json \
 # ASSERT: metadata.pages_crawled == 1
 # ASSERT: metadata.errors == [] (empty)
 
-# TEST T1.2: Pagination — follows next link
+# TEST T1.2: Pagination — follows next link across pages
 docker exec researcher pi --mode json \
   -e /app/extensions/web-scrape.ts \
   -p 'Use scrape_static on http://host.docker.internal:9999/page1 with selector ".item", extract title from ".title", paginate via ".next" up to 3 pages'
@@ -378,57 +616,65 @@ docker exec researcher pi --mode json \
 # ASSERT: items[3].title == "Item 4"
 # ASSERT: metadata.pages_crawled == 2
 
-# TEST T1.3: max_items cap
+# TEST T1.3: max_items cap respected
 docker exec researcher pi --mode json \
   -e /app/extensions/web-scrape.ts \
   -p 'Use scrape_static on http://host.docker.internal:9999/ with selector ".product", max 2 items'
 # ASSERT: items array length == 2 (not 3)
 
-# TEST T1.4: No results — bad selector
+# TEST T1.4: No results — bad selector returns empty, not crash
 docker exec researcher pi --mode json \
   -e /app/extensions/web-scrape.ts \
   -p 'Use scrape_static on http://host.docker.internal:9999/ with selector ".nonexistent"'
 # ASSERT: items array is empty
-# ASSERT: No crash, no tool_error — graceful empty result
+# ASSERT: No tool_error — graceful empty result
+# ASSERT: agent_end reached
 
-# TEST T1.5: Invalid URL
+# TEST T1.5: HTTP error surfaced cleanly
 docker exec researcher pi --mode json \
   -e /app/extensions/web-scrape.ts \
   -p 'Use scrape_static on http://host.docker.internal:9999/does-not-exist'
 # ASSERT: tool_result contains error (HTTP 404)
 # ASSERT: agent_end reached (not crashed)
 
-# TEST T1.6: Timeout — unreachable host
+# TEST T1.6: Timeout on unreachable host
 docker exec researcher pi --mode json \
   -e /app/extensions/web-scrape.ts \
   -p 'Use scrape_static on http://192.0.2.1:9999/ with selector "body"'
 # ASSERT: tool_result or tool_error contains timeout message
-# ASSERT: Completes within 20 seconds (fetch timeout, not hung)
+# ASSERT: Completes within 20 seconds (fetch timeout, not process hang)
 
 kill $FIXTURE_PID
 ```
 
-### 4.3 Tier 2 Tests — Scrapling Stealth (Python Subprocess)
+### 4.4 Tier 2 Tests — Scrapling Stealth (Python Subprocess, HTTP-Only)
 
 ```bash
 node tests/scraping/fixtures/static-server.mjs &
 FIXTURE_PID=$!
 
-# TEST T2.1: Basic stealth fetch
+# TEST T2.1: Basic stealth fetch — same data as tier 1
 docker exec researcher pi --mode json \
   -e /app/extensions/web-scrape.ts \
   -p 'Use scrape_stealth on http://host.docker.internal:9999/ with selector ".product", extract name from ".name" and price from ".price"'
 # ASSERT: JSONL tool_call with name "scrape_stealth"
 # ASSERT: tool_result items has 3 objects
 # ASSERT: items match same values as T1.1 (same page, different method)
+# ASSERT: metadata.tier == "stealth" or similar
 
-# TEST T2.2: Anti-detection — blocked page
+# TEST T2.2: Anti-detection — passes bot check that tier 1 fails
 docker exec researcher pi --mode json \
   -e /app/extensions/web-scrape.ts \
-  -p 'Use scrape_stealth on http://host.docker.internal:9999/blocked with selector "body"'
-# ASSERT: tool_result has content (Scrapling's realistic UA passes the check)
+  -p 'Use scrape_stealth on http://host.docker.internal:9999/blocked with selector ".content"'
+# ASSERT: tool_result has content ("Secret content behind bot protection")
 # ASSERT: No 403 error in result
-# Compare: scrape_static on /blocked should fail (basic UA gets 403)
+
+# TEST T2.2b: Verify tier 1 actually fails on /blocked (control test)
+docker exec researcher pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  -p 'Use scrape_static on http://host.docker.internal:9999/blocked with selector ".content"'
+# ASSERT: tool_result contains 403 error or empty items
+# This proves T2.2 is meaningful — stealth passes where static fails
 
 # TEST T2.3: Stealth pagination
 docker exec researcher pi --mode json \
@@ -436,60 +682,177 @@ docker exec researcher pi --mode json \
   -p 'Use scrape_stealth on http://host.docker.internal:9999/page1 with selector ".item", extract title from ".title", paginate via ".next" max 3 pages'
 # ASSERT: 4 items across 2 pages (same as T1.2)
 
-# TEST T2.4: Python error handling
+# TEST T2.4: Python error handling — bad URL
 docker exec researcher pi --mode json \
   -e /app/extensions/web-scrape.ts \
   -p 'Use scrape_stealth on http://host.docker.internal:9999/does-not-exist with selector ".item"'
-# ASSERT: tool_result includes error info, not a Python traceback crash
+# ASSERT: tool_result includes error info (not raw Python traceback)
 # ASSERT: agent_end reached
 
-# TEST T2.5: Large page — output size
-# (Use fixture server with a page returning 500+ items)
+# TEST T2.5: Large page — output cap
 docker exec researcher pi --mode json \
   -e /app/extensions/web-scrape.ts \
   -p 'Use scrape_stealth on http://host.docker.internal:9999/large with selector ".row", max 100 items'
-# ASSERT: items capped at 100
-# ASSERT: JSON output well-formed (no truncation)
+# ASSERT: items capped at 100 (page has 500)
+# ASSERT: JSON output well-formed (no truncation from subprocess buffer)
+
+# TEST T2.6: Subprocess stdout isolation — no Python logging leaks
+docker exec researcher pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  -p 'Use scrape_stealth on http://host.docker.internal:9999/ with selector ".product"' \
+  2>/dev/null | jq -r '.type' | sort -u
+# ASSERT: Only valid JSONL event types (agent_start, tool_call, tool_result, message_update, agent_end)
+# ASSERT: No raw Python print() output mixed into JSONL stream
 
 kill $FIXTURE_PID
 ```
 
-### 4.4 Cross-Tier Tests — Tool Selection and Escalation
+### 4.5 Tier 3 Tests — Browser Rendering (Python Subprocess, Heavy Image)
+
+These run against the heavy bespoke image (data-agent). Tests the full Playwright/Chromium path.
 
 ```bash
 node tests/scraping/fixtures/static-server.mjs &
 FIXTURE_PID=$!
 
-# TEST X.1: Agent picks correct tier given guidance
-docker exec researcher pi --mode json \
+# TEST T3.1: JS-rendered page — content only appears after script execution
+docker exec data-agent pi --mode json \
   -e /app/extensions/web-scrape.ts \
-  --append-system-prompt "For static HTML pages use scrape_static. For pages that block bots use scrape_stealth." \
-  -p 'Scrape the product listings from http://host.docker.internal:9999/ — this is a simple static page'
-# ASSERT: tool_call name is "scrape_static" (not scrape_stealth)
+  -p 'Use scrape_browser on http://host.docker.internal:9999/js with selector ".dynamic", extract title from ".title" and body from ".body"'
+# ASSERT: JSONL tool_call with name "scrape_browser"
+# ASSERT: tool_result items has 1 object
+# ASSERT: items[0].title == "Dynamic Content"
+# ASSERT: items[0].body == "Rendered by JS"
+# KEY TEST: This page returns "Loading..." without JS execution.
+#           If items contain "Loading..." instead of "Dynamic Content", browser rendering failed.
 
-# TEST X.2: Agent escalates to stealth when static fails
-docker exec researcher pi --mode json \
+# TEST T3.1b: Verify tier 1 fails on JS page (control)
+docker exec data-agent pi --mode json \
   -e /app/extensions/web-scrape.ts \
-  --append-system-prompt "Try scrape_static first. If you get a 403 or empty result, retry with scrape_stealth." \
-  -p 'Scrape http://host.docker.internal:9999/blocked for body content'
-# ASSERT: first tool_call is "scrape_static"
-# ASSERT: scrape_static result contains 403 or empty
-# ASSERT: second tool_call is "scrape_stealth"
-# ASSERT: scrape_stealth result has content
+  -p 'Use scrape_static on http://host.docker.internal:9999/js with selector ".dynamic"'
+# ASSERT: items is empty (Cheerio can't execute JS, .dynamic div doesn't exist in raw HTML)
+# This proves T3.1 is meaningful — browser rendering is required
 
-# TEST X.3: Both tools registered and visible
-docker exec researcher pi --mode json \
+# TEST T3.2: wait_for selector — explicit wait for dynamic content
+docker exec data-agent pi --mode json \
   -e /app/extensions/web-scrape.ts \
-  -p 'List all available tools you have'
-# ASSERT: output mentions "scrape_static" and "scrape_stealth"
-# ASSERT: descriptions match what was registered
+  -p 'Use scrape_browser on http://host.docker.internal:9999/js, wait for ".dynamic" to appear, then extract with selector ".dynamic"'
+# ASSERT: tool_result has content
+# ASSERT: Faster/more reliable than T3.1 (explicit wait vs implicit)
+
+# TEST T3.3: Browser can scrape static pages too (superset of tier 1)
+docker exec data-agent pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  -p 'Use scrape_browser on http://host.docker.internal:9999/ with selector ".product", extract name from ".name" and price from ".price"'
+# ASSERT: Same 3 items as T1.1
+# ASSERT: Slower than T1.1 (browser overhead) but correct
+
+# TEST T3.4: Browser passes bot detection (superset of tier 2)
+docker exec data-agent pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  -p 'Use scrape_browser on http://host.docker.internal:9999/blocked with selector ".content"'
+# ASSERT: tool_result has content (real browser UA passes check)
+
+# TEST T3.5: Browser pagination
+docker exec data-agent pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  -p 'Use scrape_browser on http://host.docker.internal:9999/page1 with selector ".item", extract title from ".title", paginate via ".next" max 3 pages'
+# ASSERT: 4 items across 2 pages
+
+# TEST T3.6: Browser memory — doesn't OOM container
+docker stats --no-stream --format '{{.MemUsage}}' data-agent
+# BEFORE: record baseline
+docker exec data-agent pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  -p 'Use scrape_browser on http://host.docker.internal:9999/ with selector ".product"'
+docker stats --no-stream --format '{{.MemUsage}}' data-agent
+# AFTER: record post-scrape
+# ASSERT: memory delta < 500MB (browser launched and exited, not leaked)
+# ASSERT: container still healthy (healthcheck passes)
+
+# TEST T3.7: Browser timeout — slow page
+docker exec data-agent pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  -p 'Use scrape_browser on http://192.0.2.1:9999/ with selector "body"'
+# ASSERT: tool_result or tool_error contains timeout
+# ASSERT: Browser process killed (not orphaned)
+# ASSERT: Completes within 30 seconds
+
+# TEST T3.8: Browser cleanup — no orphan processes after scrape
+docker exec data-agent pgrep -c chromium || echo "0"
+# ASSERT: 0 (no lingering browser processes between scrape calls)
+
+# TEST T3.9: Large page with browser — 500 items
+docker exec data-agent pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  -p 'Use scrape_browser on http://host.docker.internal:9999/large with selector ".row", max 50 items'
+# ASSERT: items capped at 50
+# ASSERT: duration_ms reasonable (< 30s — browser shouldn't choke on 500 DOM nodes)
 
 kill $FIXTURE_PID
 ```
 
-### 4.5 Apify Tests (Tier 4) — API-Level
+### 4.6 Cross-Tier Tests — Tool Selection and Escalation
 
-These don't need container-level testing. They're HTTP calls from the extension to Apify's REST API. Test via Pi JSON mode with real or mocked API.
+```bash
+node tests/scraping/fixtures/static-server.mjs &
+FIXTURE_PID=$!
+
+# TEST X.1: Agent picks static tier for simple page
+docker exec data-agent pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  --append-system-prompt "You have three scraping tools. Use scrape_static for simple HTML. Use scrape_stealth for bot-protected sites. Use scrape_browser for JS-rendered pages." \
+  -p 'Scrape the product listings from http://host.docker.internal:9999/ — this is a simple static HTML page'
+# ASSERT: tool_call name is "scrape_static" (cheapest tier)
+
+# TEST X.2: Agent picks browser tier for JS page
+docker exec data-agent pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  --append-system-prompt "You have three scraping tools. Use scrape_static for simple HTML. Use scrape_stealth for bot-protected sites. Use scrape_browser for JS-rendered pages." \
+  -p 'Scrape http://host.docker.internal:9999/js — this page uses JavaScript to render content dynamically'
+# ASSERT: tool_call name is "scrape_browser" (only tier that handles JS)
+
+# TEST X.3: Agent escalates static → stealth on 403
+docker exec data-agent pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  --append-system-prompt "Try scrape_static first. If you get a 403 or blocked error, retry with scrape_stealth. If content is empty or says Loading, retry with scrape_browser." \
+  -p 'Scrape http://host.docker.internal:9999/blocked for the page content'
+# ASSERT: first tool_call is "scrape_static"
+# ASSERT: scrape_static result contains 403 or "Forbidden"
+# ASSERT: second tool_call is "scrape_stealth"
+# ASSERT: scrape_stealth result has content
+
+# TEST X.4: Agent escalates static → browser on JS page
+docker exec data-agent pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  --append-system-prompt "Try scrape_static first. If content is empty or says Loading, retry with scrape_browser." \
+  -p 'Scrape http://host.docker.internal:9999/js for the dynamic content'
+# ASSERT: first tool_call is "scrape_static"
+# ASSERT: scrape_static result is empty or contains "Loading..."
+# ASSERT: second tool_call is "scrape_browser"
+# ASSERT: scrape_browser result contains "Dynamic Content"
+
+# TEST X.5: All tools registered and visible
+docker exec data-agent pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  -p 'List all your available scraping tools and describe what each one does'
+# ASSERT: output mentions "scrape_static", "scrape_stealth", "scrape_browser"
+# ASSERT: descriptions distinguish the tiers
+
+# TEST X.6: Lightweight image only has tiers 1-2
+docker exec researcher pi --mode json \
+  -e /app/extensions/web-scrape.ts \
+  -p 'List all your available scraping tools'
+# ASSERT: output mentions "scrape_static" and "scrape_stealth"
+# ASSERT: output does NOT mention "scrape_browser" (not available in lightweight image)
+# NOTE: Extension should detect missing browser deps and not register scrape_browser
+
+kill $FIXTURE_PID
+```
+
+### 4.7 Apify Tests (Tier 4) — API-Level
+
+HTTP calls from extension to Apify REST API. No special image deps.
 
 ```bash
 # TEST A.1: Actor discovery (requires APIFY_API_TOKEN)
@@ -503,161 +866,67 @@ docker exec -e APIFY_API_TOKEN=$APIFY_API_TOKEN researcher pi --mode json \
 # TEST A.2: Actor execution on test URL
 docker exec -e APIFY_API_TOKEN=$APIFY_API_TOKEN researcher pi --mode json \
   -e /app/extensions/web-scrape.ts \
-  -p 'Use scrape with tier "apify", actor_id "apify/web-scraper", and scrape http://example.com for the h1 text'
-# ASSERT: tool_call with name "scrape"
+  -p 'Use scrape_apify with actor_id "apify/web-scraper" to scrape http://example.com for the h1 text'
+# ASSERT: tool_call with name "scrape_apify"
 # ASSERT: tool_result has items or run_id (may be async)
 # ASSERT: No API auth errors
 
-# TEST A.3: Missing API token
+# TEST A.3: Missing API token — clear error
 docker exec researcher pi --mode json \
   -e /app/extensions/web-scrape.ts \
   -p 'Use list_actors to search for "scraper"'
-# ASSERT: tool_error or tool_result with clear "APIFY_API_TOKEN not configured" message
+# ASSERT: tool_error or tool_result with "APIFY_API_TOKEN not configured" message
 # ASSERT: agent_end reached (not crashed)
 
-# TEST A.4: Invalid actor ID
+# TEST A.4: Invalid actor ID — API error surfaced
 docker exec -e APIFY_API_TOKEN=$APIFY_API_TOKEN researcher pi --mode json \
   -e /app/extensions/web-scrape.ts \
-  -p 'Use scrape with tier "apify", actor_id "fake/nonexistent-actor", on http://example.com'
+  -p 'Use scrape_apify with actor_id "fake/nonexistent-actor" on http://example.com'
 # ASSERT: tool_result contains Apify API error (404 or similar)
 # ASSERT: No crash
 ```
 
-### 4.6 Gateway Tests (HTTP Contract)
+### 4.8 Image Build Tests
 
-Only needed if gateway is built (tier 3 browser scraping). Hurl-based, matching existing test patterns.
-
-```hurl
-# tests/hurl/scrape-gateway.hurl
-
-# TEST G.1: Health endpoint
-GET http://localhost:8090/health
-HTTP 200
-[Asserts]
-jsonpath "$.status" == "ok"
-jsonpath "$.active_containers" >= 0
-
-# TEST G.2: Unknown tier rejected
-POST http://localhost:8090/scrape
-Content-Type: application/json
-{"tier": "fake_tier", "params": {"url": "http://example.com"}}
-HTTP 400
-[Asserts]
-jsonpath "$.error" contains "Unknown tier"
-
-# TEST G.3: Cheerio tier — basic extraction
-POST http://localhost:8090/scrape
-Content-Type: application/json
-{
-  "tier": "cheerio",
-  "params": {
-    "url": "http://host.docker.internal:9999/",
-    "selector": ".product",
-    "extract_fields": {"name": ".name", "price": ".price"}
-  }
-}
-HTTP 200
-[Asserts]
-jsonpath "$.items" count == 3
-jsonpath "$.items[0].name" == "Widget A"
-jsonpath "$.metadata.tier_used" == "cheerio"
-jsonpath "$.metadata.pages_crawled" == 1
-duration < 30000
-
-# TEST G.4: Auto-escalation (cheerio fails → scrapling)
-POST http://localhost:8090/scrape
-Content-Type: application/json
-{
-  "tier": "cheerio",
-  "params": {"url": "http://host.docker.internal:9999/blocked", "selector": "body"},
-  "auto_escalate": true
-}
-HTTP 200
-[Asserts]
-jsonpath "$.metadata.tier_used" != "cheerio"
-jsonpath "$.items" count > 0
-
-# TEST G.5: Concurrency cap (fire 6 requests, 6th should queue)
-# Run via orchestrator script — not expressible in Hurl
-
-# TEST G.6: Timeout — container killed at deadline
-POST http://localhost:8090/scrape
-Content-Type: application/json
-{
-  "tier": "cheerio",
-  "params": {"url": "http://192.0.2.1:9999/"},
-  "timeout": 5
-}
-HTTP 500
-[Asserts]
-jsonpath "$.error" contains "Timeout"
-duration < 15000
-
-# TEST G.7: Rate limiting — same domain rapid fire
-# Run via orchestrator — need 3 rapid requests to same domain, verify spacing
-```
-
-### 4.7 Entrypoint Script Tests (Standalone Container)
-
-Test each tier's entrypoint independently via `docker run`, no Pi involved. Validates the script contract in isolation.
+Validates the bespoke image pattern itself works correctly.
 
 ```bash
-# Start fixture server
-node tests/scraping/fixtures/static-server.mjs &
-FIXTURE_PID=$!
+# TEST B.1: Base image builds
+docker compose build ceo
+# ASSERT: exit 0
+# ASSERT: image uses shared Dockerfile (docker inspect confirms)
 
-# TEST E.1: Cheerio entrypoint — extraction
-docker run --rm --network host \
-  -v $(pwd)/src/agents/scrape-gateway/entrypoints/cheerio.mjs:/app/e.mjs:ro \
-  node:22-slim node /app/e.mjs \
-  '{"url":"http://localhost:9999/","selector":".product","extract_fields":{"name":".name","price":".price"}}'
-# ASSERT: valid JSON on stdout
-# ASSERT: .items has 3 objects
-# ASSERT: .items[0].name == "Widget A"
-# ASSERT: .pages_crawled == 1
-# ASSERT: .errors == []
+# TEST B.2: Lightweight bespoke image builds
+docker compose build researcher
+# ASSERT: exit 0
+# ASSERT: image uses researcher/Dockerfile
+# ASSERT: python3 available: docker exec researcher python3 --version
 
-# TEST E.2: Cheerio entrypoint — pagination
-docker run --rm --network host \
-  -v $(pwd)/src/agents/scrape-gateway/entrypoints/cheerio.mjs:/app/e.mjs:ro \
-  node:22-slim node /app/e.mjs \
-  '{"url":"http://localhost:9999/page1","selector":".item","extract_fields":{"title":".title"},"pagination":{"next_selector":".next","max_pages":3}}'
-# ASSERT: .items has 4 objects
-# ASSERT: .pages_crawled == 2
+# TEST B.3: Heavy bespoke image builds
+docker compose build data-agent
+# ASSERT: exit 0
+# ASSERT: image uses data-agent/Dockerfile
+# ASSERT: playwright available: docker exec data-agent python3 -c "from scrapling import PlayWrightFetcher; print('ok')"
 
-# TEST E.3: Scrapling entrypoint — stealth extraction
-docker run --rm --network host \
-  -v $(pwd)/src/agents/scrape-gateway/entrypoints/scrapling.py:/app/e.py:ro \
-  pyd4vinci/scrapling:latest python /app/e.py \
-  '{"url":"http://localhost:9999/","selector":".product","extract_fields":{"name":".name","price":".price"}}'
-# ASSERT: valid JSON on stdout
-# ASSERT: .items has 3 objects
+# TEST B.4: Base image does NOT have Python
+docker exec ceo python3 --version
+# ASSERT: exit non-zero (python3 not found — base stays lean)
 
-# TEST E.4: Scrapling entrypoint — anti-detection
-docker run --rm --network host \
-  -v $(pwd)/src/agents/scrape-gateway/entrypoints/scrapling.py:/app/e.py:ro \
-  pyd4vinci/scrapling:latest python /app/e.py \
-  '{"url":"http://localhost:9999/blocked","selector":"body"}'
-# ASSERT: .items is non-empty (stealth UA passes)
-# ASSERT: .errors is empty
+# TEST B.5: Lightweight image does NOT have Playwright browsers
+docker exec researcher python3 -c "from scrapling import PlayWrightFetcher; print('ok')"
+# ASSERT: exit non-zero (PlayWrightFetcher not installed — only Fetcher)
 
-# TEST E.5: Output contract — all entrypoints produce same schema
-# For each entrypoint output, validate:
-#   - JSON parseable
-#   - Has "items" (array)
-#   - Has "pages_crawled" (number)
-#   - Has "duration_ms" (number)
-#   - Has "errors" (array)
+# TEST B.6: All images share same bridge behavior
+for agent in ceo researcher data-agent; do
+  curl -s http://localhost:$(docker port $agent 8080 | cut -d: -f2)/health | jq .status
+done
+# ASSERT: all return "ok" — bespoke deps don't break base functionality
 
-# TEST E.6: Bad URL — entrypoint doesn't crash
-docker run --rm --network host \
-  -v $(pwd)/src/agents/scrape-gateway/entrypoints/cheerio.mjs:/app/e.mjs:ro \
-  node:22-slim node /app/e.mjs \
-  '{"url":"http://localhost:9999/nonexistent","selector":"body"}'
-# ASSERT: valid JSON (not crash/stack trace)
-# ASSERT: .errors is non-empty
-
-kill $FIXTURE_PID
+# TEST B.7: docker-compose up starts all services
+docker compose up -d
+docker compose ps --format '{{.Service}} {{.State}}'
+# ASSERT: all services "running"
+# ASSERT: healthchecks pass within 60s
 ```
 
 ### Test runner script
@@ -665,44 +934,163 @@ kill $FIXTURE_PID
 ```bash
 #!/usr/bin/env bash
 # tests/scraping/run-tests.sh
-# Usage: ./run-tests.sh [spike|tier1|tier2|cross|apify|gateway|entrypoint|all]
+# Usage: ./run-tests.sh [spike|heavy|tier1|tier2|tier3|cross|apify|build|all]
+#
+# Runs scraping test suite against running containers.
+# Prerequisites:
+#   - docker compose up -d (all services running)
+#   - Fixture server started by this script
 
 set -euo pipefail
 
-TIER="${1:-all}"
+SUITE="${1:-all}"
 PASS=0
 FAIL=0
+SKIP=0
 FIXTURE_PID=""
+RESULTS_DIR="tests/results/scraping-$(date +%Y%m%d-%H%M%S)"
+
+mkdir -p "$RESULTS_DIR"
 
 start_fixture() {
+  echo "Starting fixture server on :9999..."
   node tests/scraping/fixtures/static-server.mjs &
   FIXTURE_PID=$!
   sleep 1
+  if ! kill -0 "$FIXTURE_PID" 2>/dev/null; then
+    echo "FATAL: fixture server failed to start"
+    exit 1
+  fi
 }
 
 stop_fixture() {
   [ -n "$FIXTURE_PID" ] && kill "$FIXTURE_PID" 2>/dev/null || true
+  FIXTURE_PID=""
 }
 
-assert_jsonl_contains() {
-  local output="$1" event_type="$2" field="$3" expected="$4"
-  if echo "$output" | grep -q "\"type\":\"$event_type\"" && echo "$output" | grep -q "\"$field\":\"$expected\""; then
+# Run a Pi JSON mode test inside a container.
+# Usage: run_pi_test <container> <test_name> <extension> <prompt> [extra_pi_args...]
+# Captures JSONL output to results dir.
+run_pi_test() {
+  local container="$1" test_name="$2" extension="$3" prompt="$4"
+  shift 4
+  local outfile="$RESULTS_DIR/${test_name}.jsonl"
+
+  echo -n "  [$test_name] "
+  if docker exec "$container" pi --mode json -e "$extension" "$@" -p "$prompt" > "$outfile" 2>&1; then
+    echo "$outfile"
+    return 0
+  else
+    echo "EXEC FAILED (exit $?)" | tee -a "$outfile"
+    return 1
+  fi
+}
+
+# Assert JSONL output contains event with field value
+assert_jsonl() {
+  local file="$1" description="$2" pattern="$3"
+  if grep -q "$pattern" "$file"; then
     PASS=$((PASS + 1))
-    echo "  [PASS] $5"
+    echo "    [PASS] $description"
   else
     FAIL=$((FAIL + 1))
-    echo "  [FAIL] $5"
-    echo "    Expected $event_type with $field=$expected"
-    echo "    Got: $(echo "$output" | head -5)"
+    echo "    [FAIL] $description"
+    echo "           Pattern not found: $pattern"
+    echo "           First 5 lines: $(head -5 "$file")"
+  fi
+}
+
+assert_not_jsonl() {
+  local file="$1" description="$2" pattern="$3"
+  if ! grep -q "$pattern" "$file"; then
+    PASS=$((PASS + 1))
+    echo "    [PASS] $description"
+  else
+    FAIL=$((FAIL + 1))
+    echo "    [FAIL] $description (pattern should NOT match)"
   fi
 }
 
 trap stop_fixture EXIT
 
-# ... test functions per tier ...
+run_spike() {
+  echo "[SPIKE] Subprocess verification"
+  # S.1 - S.4 tests here
+}
+
+run_heavy() {
+  echo "[HEAVY] Heavy image spike"
+  # H.1 - H.6 tests here
+}
+
+run_tier1() {
+  echo "[TIER 1] Cheerio — static HTML"
+  start_fixture
+  # T1.1 - T1.6 tests here
+  stop_fixture
+}
+
+run_tier2() {
+  echo "[TIER 2] Scrapling — stealth"
+  start_fixture
+  # T2.1 - T2.6 tests here
+  stop_fixture
+}
+
+run_tier3() {
+  echo "[TIER 3] Playwright — browser rendering"
+  start_fixture
+  # T3.1 - T3.9 tests here
+  stop_fixture
+}
+
+run_cross() {
+  echo "[CROSS] Tool selection + escalation"
+  start_fixture
+  # X.1 - X.6 tests here
+  stop_fixture
+}
+
+run_apify() {
+  echo "[APIFY] Tier 4 — API"
+  # A.1 - A.4 tests here
+}
+
+run_build() {
+  echo "[BUILD] Image build verification"
+  # B.1 - B.7 tests here
+}
+
+case "$SUITE" in
+  spike)    run_spike ;;
+  heavy)    run_heavy ;;
+  tier1)    run_tier1 ;;
+  tier2)    run_tier2 ;;
+  tier3)    run_tier3 ;;
+  cross)    run_cross ;;
+  apify)    run_apify ;;
+  build)    run_build ;;
+  all)
+    run_build
+    run_spike
+    run_heavy
+    run_tier1
+    run_tier2
+    run_tier3
+    run_cross
+    run_apify
+    ;;
+  *)
+    echo "Usage: $0 [spike|heavy|tier1|tier2|tier3|cross|apify|build|all]"
+    exit 1
+    ;;
+esac
 
 echo ""
-echo "Results: $PASS passed, $FAIL failed"
+echo "================================"
+echo "Results: $PASS passed, $FAIL failed, $SKIP skipped"
+echo "Output:  $RESULTS_DIR/"
+echo "================================"
 exit $FAIL
 ```
 
@@ -716,49 +1104,80 @@ GIVEN no Dockerfile exists in agent directory
 WHEN `docker compose build {name}` runs
 THEN the base Dockerfile is used
 
-GIVEN the bespoke image includes python3 + scrapling
-WHEN a Pi extension calls `execFileSync("python3", ["-c", "from scrapling import Fetcher; print('ok')"])`
-THEN stdout returns "ok" and exit code is 0
+GIVEN the lightweight bespoke image
+WHEN `python3 -c "from scrapling import Fetcher"` runs inside container
+THEN it succeeds (Fetcher available)
+AND `python3 -c "from scrapling import PlayWrightFetcher"` fails (not installed)
 
-GIVEN the fixture server is running on host port 9999
-WHEN Pi invokes `scrape_static` on `http://host.docker.internal:9999/` with selector `.product`
-THEN tool_result contains 3 items with correct name/price fields
+GIVEN the heavy bespoke image
+WHEN `python3 -c "from scrapling import PlayWrightFetcher"` runs inside container
+THEN it succeeds (full scrapling with browsers available)
 
-GIVEN the fixture server returns 403 for non-stealth User-Agents on /blocked
-WHEN Pi invokes `scrape_stealth` on that URL
-THEN tool_result contains page content (Scrapling's stealth UA passes)
+GIVEN the base image
+WHEN `python3 --version` runs inside container
+THEN it fails (Python not installed — base stays lean)
+
+GIVEN the fixture server serves JS-rendered content at /js
+WHEN `scrape_static` is used on /js
+THEN items are empty (Cheerio can't execute JS)
+AND when `scrape_browser` is used on /js
+THEN items contain "Dynamic Content" (browser executed JS)
+
+GIVEN the fixture server returns 403 to non-stealth UAs on /blocked
+WHEN `scrape_static` is used on /blocked
+THEN result contains 403 error
+AND when `scrape_stealth` is used on /blocked
+THEN result contains page content (stealth UA passes)
+
+GIVEN the extension detects missing browser dependencies at registration time
+WHEN loaded in lightweight image (no Playwright)
+THEN `scrape_browser` tool is NOT registered
+AND `scrape_static` and `scrape_stealth` ARE registered
 
 GIVEN APIFY_API_TOKEN is not set
 WHEN Pi invokes any Apify tool
 THEN tool returns clear error message (not crash)
 
+GIVEN a browser scrape completes
+WHEN checking for orphan processes
+THEN no chromium/firefox processes remain running
+
 ## Edge Case Inventory
 
-- Python not installed in base image → scrape_stealth fails with clear "python3 not found" error
+- Python not in base image → scrape_stealth/scrape_browser register but fail with "python3 not found" diagnostic
 - Scrapling not installed → import error caught, returned as tool error
-- Subprocess hangs → timeout kills it within 10s, tool returns timeout error
+- PlayWrightFetcher not installed (lightweight image) → scrape_browser not registered at all
+- Subprocess hangs → execFileSync timeout kills it within 10s
 - Fixture server not running → fetch timeout, tool returns error (not hang)
-- Container lacks network access to host → host.docker.internal resolution fails, clear error
-- Extension loaded but wrong container (base image, no python) → tool registers but fails on call with diagnostic message
-- Concurrent subprocess calls from same extension → no shared state, each gets own process
+- Container lacks host network access → host.docker.internal resolution fails, clear error
+- Concurrent subprocess calls → no shared state, each gets own process
 - Python script outputs non-JSON → extension catches parse error, wraps in error message
-- Very large Python stdout (>1MB) → maxBuffer in execFileSync prevents hang, returns truncation error
+- Very large stdout (>5MB) → maxBuffer in execFileSync prevents hang, returns truncation error
+- Browser process orphaned after timeout → extension must ensure cleanup (try/finally in Python script)
+- Heavy image OOM during browser scrape → container restart policy (unless-stopped) recovers
+- Multiple browser scrapes in sequence → memory should return to baseline between calls
+- JS page with infinite loading spinner → wait_for timeout prevents hang, returns partial or error
 
 ## Definition of Done
 
-- [ ] Bespoke Dockerfile pattern documented in this plan
-- [ ] docker-compose.yml updated to reference per-agent Dockerfile when present
+- [ ] Bespoke Dockerfile pattern documented
+- [ ] Lightweight bespoke Dockerfile (researcher) — python3 + scrapling + cheerio
+- [ ] Heavy bespoke Dockerfile (data-agent) — python3 + scrapling[fetchers] + playwright + chromium
+- [ ] docker-compose.yml updated: per-agent dockerfile paths, memory limits for heavy image
 - [ ] Spike extension (spike-subprocess.ts) written and tested
 - [ ] Spike confirms subprocess works from Pi extension (or documents failure + alternative)
-- [ ] Fixture server with static/paginated/blocked pages
-- [ ] Test runner script (run-tests.sh)
+- [ ] Python worker scripts: scrape_stealth.py, scrape_browser.py
+- [ ] web-scrape.ts extension: registers scrape_static, scrape_stealth, scrape_browser (conditional), Apify tools
+- [ ] Fixture server with static/paginated/blocked/js-rendered/large pages
+- [ ] Test runner script (run-tests.sh) with per-suite invocation
 - [ ] Spike tests (S.1-S.4) pass
+- [ ] Heavy image tests (H.1-H.6) pass
 - [ ] Tier 1 tests (T1.1-T1.6) pass
-- [ ] Tier 2 tests (T2.1-T2.5) pass
-- [ ] Cross-tier tests (X.1-X.3) pass
+- [ ] Tier 2 tests (T2.1-T2.6) pass
+- [ ] Tier 3 tests (T3.1-T3.9) pass
+- [ ] Cross-tier tests (X.1-X.6) pass
 - [ ] Apify tests (A.1-A.4) pass
-- [ ] Gateway tests (G.1-G.7) pass (if gateway built)
-- [ ] Entrypoint tests (E.1-E.6) pass (if entrypoints built)
+- [ ] Image build tests (B.1-B.7) pass
 - [ ] CLAUDE.md updated with bespoke image pattern
 - [ ] All tests invokable with single command
 - [ ] tasks/todo.md updated
@@ -766,8 +1185,10 @@ THEN tool returns clear error message (not crash)
 ## Open Questions
 
 None. Decisions made:
-- Subprocess approach: `execFileSync` from extension (spike to confirm)
+- No gateway. Agents carry own deps. Docker-in-docker eliminated.
+- Subprocess approach: execFileSync from extension (spike to confirm)
 - Fallback if subprocess blocked: sidecar microservice
-- Tier 3 (browser): deferred, not needed for eval
-- Multi-stage build: deferred until agent count > 2
-- Test runner: bash script (WSL), not PowerShell (consistency with existing scripts/)
+- Tier 3 included — heavy image validates the pattern for large deps
+- Extension conditionally registers tools based on available deps
+- Multi-stage build: deferred until agent count > 3
+- Test runner: bash script (WSL), matches existing scripts/ convention

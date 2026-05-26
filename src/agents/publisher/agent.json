@@ -1,0 +1,16 @@
+{
+  "name": "Publisher",
+  "role": "publisher",
+  "title": "Publishing Manager",
+  "icon": "megaphone",
+  "reportsTo": "CEO",
+  "capabilities": "External publishing with HITL gating, social media, email, scheduling, analytics",
+  "adapterType": "http",
+  "adapterConfig": {
+    "url": "http://publisher:8080/invoke",
+    "timeoutSec": 300
+  },
+  "runtimeConfig": {
+    "heartbeat": { "enabled": false, "wakeOnDemand": true }
+  }
+}

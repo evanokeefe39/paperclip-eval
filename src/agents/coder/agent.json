@@ -1,0 +1,16 @@
+{
+  "name": "Coder",
+  "role": "coder",
+  "title": "Software Engineer",
+  "icon": "code",
+  "reportsTo": "CEO",
+  "capabilities": "Code execution, analysis, implementation, testing within sandboxed container",
+  "adapterType": "http",
+  "adapterConfig": {
+    "url": "http://coder:8080/invoke",
+    "timeoutSec": 300
+  },
+  "runtimeConfig": {
+    "heartbeat": { "enabled": false, "wakeOnDemand": true }
+  }
+}

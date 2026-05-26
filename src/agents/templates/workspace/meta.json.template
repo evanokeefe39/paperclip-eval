@@ -1,0 +1,16 @@
+{
+  "agent_name": "{{AGENT_NAME}}",
+  "agent_id": "{{PAPERCLIP_AGENT_ID}}",
+  "role": "{{AGENT_ROLE}}",
+  "created_at": "{{ISO 8601}}",
+  "last_active": null,
+  "current_issue_id": null,
+  "extensions_loaded": [],
+  "workspace_version": 1,
+  "git": {
+    "enabled": false,
+    "remote": null,
+    "branch": "agent/{{AGENT_NAME}}",
+    "last_sync": null
+  }
+}

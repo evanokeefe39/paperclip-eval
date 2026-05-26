@@ -1,0 +1,16 @@
+{
+  "name": "Writer",
+  "role": "writer",
+  "title": "Content Writer",
+  "icon": "pencil",
+  "reportsTo": "CEO",
+  "capabilities": "Transforms research into coherent narratives, applies tone and voice context, citation formatting",
+  "adapterType": "http",
+  "adapterConfig": {
+    "url": "http://writer:8080/invoke",
+    "timeoutSec": 300
+  },
+  "runtimeConfig": {
+    "heartbeat": { "enabled": false, "wakeOnDemand": true }
+  }
+}

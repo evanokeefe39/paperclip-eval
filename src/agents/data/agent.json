@@ -1,0 +1,16 @@
+{
+  "name": "Data",
+  "role": "data",
+  "title": "Data Analyst",
+  "icon": "database",
+  "reportsTo": "CEO",
+  "capabilities": "Database operations, SQL queries, data management, web scraping, organizational data curation",
+  "adapterType": "http",
+  "adapterConfig": {
+    "url": "http://data:8080/invoke",
+    "timeoutSec": 300
+  },
+  "runtimeConfig": {
+    "heartbeat": { "enabled": false, "wakeOnDemand": true }
+  }
+}

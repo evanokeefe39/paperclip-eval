@@ -1,0 +1,19 @@
+{
+  "packages": [
+    "npm:shitty-extensions",
+    "npm:@ifi/pi-extension-subagents"
+  ],
+  "terminal": {
+    "showTerminalProgress": true
+  },
+  "steeringMode": "all",
+  "followUpMode": "all",
+  "quietStartup": true,
+  "theme": "dark",
+  "defaultProvider": "deepseek",
+  "defaultModel": "deepseek-chat",
+  "defaultThinkingLevel": "high",
+  "compaction": {
+    "enabled": false
+  }
+}

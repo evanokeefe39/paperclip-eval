@@ -9,6 +9,7 @@ WORKDIR /app
 
 COPY bridge.mjs .
 COPY extensions/ /app/extensions/
+COPY skills/ /app/skills/
 COPY ${AGENT_NAME}/.pi/agent/config.yml /root/.pi/agent/config.yml
 COPY ${AGENT_NAME}/.pi/agent/models.json /root/.pi/agent/models.json
 COPY ${AGENT_NAME}/.pi/agent/settings.json /root/.pi/agent/settings.json

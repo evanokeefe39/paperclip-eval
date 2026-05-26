@@ -1,0 +1,15 @@
+{
+  "issue_id": "{{paperclip issue ID}}",
+  "platform": "{{platform name}}",
+  "published_at": "{{ISO 8601 timestamp}}",
+  "url": "{{published content URL}}",
+  "content_hash": "{{SHA-256 of published content}}",
+  "source_artifact": "{{artifact path to QA-approved content}}",
+  "qa_verdict": "{{artifact path to QA PASS verdict}}",
+  "hitl_approved_by": "{{who approved the publish}}",
+  "hitl_approved_at": "{{ISO 8601 timestamp}}",
+  "metrics_snapshot": {
+    "followers_at_publish": null,
+    "note": "populated by analytics tool post-publish"
+  }
+}

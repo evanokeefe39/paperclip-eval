@@ -1,0 +1,16 @@
+{
+  "name": "QA",
+  "role": "qa",
+  "title": "Quality Assurance",
+  "icon": "shield-check",
+  "reportsTo": "CEO",
+  "capabilities": "Evaluative gating, branding checks, coding standards validation, kaizen integration",
+  "adapterType": "http",
+  "adapterConfig": {
+    "url": "http://qa:8080/invoke",
+    "timeoutSec": 300
+  },
+  "runtimeConfig": {
+    "heartbeat": { "enabled": false, "wakeOnDemand": true }
+  }
+}

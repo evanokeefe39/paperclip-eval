@@ -1,4 +1,6 @@
-# Web Scraping Gateway
+# Web Scraping Gateway [SUPERSEDED]
+
+> **Superseded by:** `bespoke-agent-images.md` — agents carry their own scraping deps directly. No gateway, no docker-in-docker. This plan is retained for reference only.
 
 ## Intent
 
