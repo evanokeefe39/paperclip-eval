@@ -123,6 +123,7 @@ const server = http.createServer(async (req, res) => {
     "-e", "/app/extensions/escalate.ts",
     "-e", "/app/extensions/web-scrape.ts",
     "-e", "/app/skills/paperclip-tools.ts",
+    "-e", "/app/extensions/artifacts.ts",
     ...(systemPrompt ? ["--append-system-prompt", systemPrompt] : []),
   ];
 

@@ -1,0 +1,28 @@
+{
+  "name": "paperclip-eval",
+  "version": "1.0.0",
+  "description": "Evaluation setup for running [Paperclip](https://github.com/paperclipai/paperclip) with [Pi](https://github.com/badlogic/pi-mono) agents, fully containerized via Docker Compose. Bypasses the Windows CLI argument length limit that breaks the default pi_local adapter.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/evanokeefe39/paperclip-eval.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/evanokeefe39/paperclip-eval/issues"
+  },
+  "homepage": "https://github.com/evanokeefe39/paperclip-eval#readme",
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3"
+  }
+}

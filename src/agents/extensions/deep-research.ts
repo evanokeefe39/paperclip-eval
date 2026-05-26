@@ -162,7 +162,7 @@ export default function (pi: ExtensionAPI) {
           sub_query: "enrichment",
           sub_query_id: "enrichment",
           topic_tags: raw.topic_tags || [],
-          entities: (raw.entities || []).map(e => ({ name: e.name, type: e.type })),
+          entities: (raw.entities || []).map((e: any) => ({ name: e.name, type: e.type })),
           related_findings: [],
           contradicts: [],
         };

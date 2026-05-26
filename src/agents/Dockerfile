@@ -15,6 +15,8 @@ COPY ${AGENT_NAME}/.pi/agent/models.json /root/.pi/agent/models.json
 COPY ${AGENT_NAME}/.pi/agent/settings.json /root/.pi/agent/settings.json
 COPY ${AGENT_NAME}/.pi/agent/auth.json /root/.pi/agent/auth.json
 COPY ${AGENT_NAME}/AGENTS.md /app/AGENTS.md
+COPY templates/ /app/templates/
+ENV AGENT_NAME=${AGENT_NAME}
 
 RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents || true
 
