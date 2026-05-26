@@ -36,7 +36,6 @@ async function reportCostEvent(usage) {
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${PAPERCLIP_API_KEY}`,
-        "Origin": PAPERCLIP_API_URL,
       },
       body: JSON.stringify({
         agentId: PAPERCLIP_AGENT_ID,

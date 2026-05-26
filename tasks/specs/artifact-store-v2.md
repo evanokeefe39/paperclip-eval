@@ -1,4 +1,4 @@
-# Artifact Store v2: Postgres + MinIO + Filestash
+# Artifact Store v2: Bun Service + Postgres + MinIO
 
 ## Status
 
@@ -6,77 +6,76 @@ Spec. Supersedes ext-artifacts.md (v1) for storage backend. Tool interface prese
 
 ## Intent
 
-Replace the bind-mounted `./artifacts` directory and `.meta.json` sidecar files with a proper artifact store: MinIO for blob storage, Postgres for metadata, Filestash for browsing. Establish the foundation for RBAC, lineage tracking, content-addressable dedup, and the `artifact://` URI scheme. Externalize Paperclip's embedded Postgres into the same shared instance.
+Replace the bind-mounted `./artifacts` directory and `.meta.json` sidecar files with a proper artifact store: a Bun-based artifact service exposing REST routes, MinIO for blob storage, Postgres for metadata. Agents interact with the service over HTTP — no direct database or S3 connections from extensions.
 
-This is the "Option B" from ROADMAP.md, adapted to eval-stage constraints.
+This is "Option B" from ROADMAP.md, adapted to eval-stage constraints.
 
 ## Context Package
 
 ### Relevant existing code
 
 - `src/agents/extensions/artifacts.ts` — v1 extension, 354 lines. Registers 4 tools: `write_artifact`, `read_artifact`, `list_artifacts`, `get_template`. Uses `node:fs` to read/write files on a shared Docker volume. Metadata stored as `.meta.json` sidecar files alongside artifacts. Path traversal guards, agent namespace isolation on writes, open reads.
-- `docker-compose.yml` — current stack: Paperclip (embedded Postgres), Aspire dashboard, 4 agent containers (ceo, researcher, data, writer). Artifacts shared via `./artifacts:/artifacts` bind mount. Per-agent workspace as named Docker volumes.
+- `docker-compose.yml` — current stack: Paperclip (embedded Postgres), Aspire dashboard, 4 agent containers (ceo, researcher, data, writer). Artifacts shared via `./artifacts:/artifacts` bind mount.
 - `.env.example` — shared provider API keys, bridge defaults, Discord config. No database or object store config yet.
-- `tasks/specs/ext-artifacts.md` — v1 spec. Documents tool interface, sidecar schema, path conventions, security model. Tool signatures are the stable API — internal implementation changes.
-- `ROADMAP.md` — documents MinIO as planned, blocked on eval validation of the shared volume pattern.
-- `src/agents/skills/client.ts` — Paperclip API client pattern (session-cookie auth with caching). Reference for how extensions authenticate with services.
+- `tasks/specs/ext-artifacts.md` — v1 spec. Documents tool interface, sidecar schema, path conventions, security model. Tool signatures are the stable API.
+- `src/agents/skills/client.ts` — Paperclip API client pattern (session-cookie auth with caching). Reference for how extensions talk to services over HTTP.
 
 ### Architectural constraints
 
-- Agents run as Pi extensions inside Docker containers. No npm deps beyond what Pi provides (typebox available). MinIO client must be added as a dependency or use raw HTTP (S3 API is just HTTP with signing).
-- Bridge is zero-dep Node.js. New deps in the extension layer are acceptable if kept minimal.
+- Agents run Pi extensions in Node containers. Extensions cannot install arbitrary deps into the Pi runtime. HTTP client calls are the clean boundary.
+- Bridge is zero-dep Node.js. Extension layer stays thin.
 - Paperclip supports `DATABASE_URL` env var for external Postgres. Setting it disables the embedded instance.
-- Eval stage — optimize for debuggability and simplicity over production hardening. Named volumes over managed services. Single-node everything.
+- Eval stage — optimize for debuggability and simplicity. Named volumes over managed services. Single-node everything.
 
 ### Prior decisions
 
-- Pass-by-reference: agents exchange artifact paths/URIs, never inline content. Established in v1, strengthened here with `artifact://` URIs.
-- Agent namespace isolation: agents write only to their own namespace. Reads are broader (configurable in v2 via RBAC).
-- Workspace vs artifacts separation: `/workspace` is ephemeral per-agent scratch space (named Docker volumes). Artifact store is durable shared storage. These remain distinct.
-- Sidecar metadata: v1 used `.meta.json` files. v2 moves metadata to Postgres. Sidecars eliminated.
+- Pass-by-reference: agents exchange artifact URIs, never inline content.
+- Agent namespace isolation: agents write only to their own namespace. Reads are configurable via RBAC.
+- Workspace vs artifacts separation: `/workspace` is ephemeral per-agent scratch. Artifact store is durable shared storage. These remain distinct.
 
 ### Anti-patterns to avoid
 
-- No ORM. Raw SQL with parameterized queries. The schema is small and stable.
-- No S3 SDK. Use `@aws-sdk/client-s3` only — it's the standard, well-maintained, and handles SigV4 signing. Do not use minio-js (less maintained, non-standard extensions).
-- No centralized artifact service container. Extension connects directly to Postgres + MinIO. Centralized service is a future option, not eval-stage scope.
-- No migration framework. Schema is applied via init script mounted into Postgres container. For eval, `CREATE TABLE IF NOT EXISTS` is sufficient.
+- No ORM. Raw SQL with parameterized queries via `Bun.sql`.
+- No centralized artifact service that tries to do everything. Keep routes thin — validate, store, respond.
+- No migration framework. Schema applied via init script. `CREATE TABLE IF NOT EXISTS` for eval.
+- No speculative features. Tables, routes, and code exist only when something reads/writes them.
 
 ## Architecture
 
 ### Container topology
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  docker-compose                                                  │
-│                                                                  │
-│  ┌──────────┐   DATABASE_URL    ┌──────────┐                    │
-│  │ Paperclip│──────────────────▶│ Postgres │◀── ARTIFACT_DB_URL │
-│  └──────────┘                   │ (2 DBs)  │          │         │
-│                                 │paperclip │          │         │
-│  ┌──────────┐                   │art_store │          │         │
-│  │ Aspire   │                   └──────────┘          │         │
-│  │Dashboard │                                         │         │
-│  └──────────┘                   ┌──────────┐          │         │
-│                          ┌─────▶│  MinIO   │◀─────────┤         │
-│  ┌──────────┐            │      │ :9000 API│          │         │
-│  │   CEO    │─── ext ────┤      │ :9001 UI │          │         │
-│  ├──────────┤            │      └──────────┘          │         │
-│  │Researcher│─── ext ────┤                            │         │
-│  ├──────────┤            │      ┌──────────┐          │         │
-│  │  Data    │─── ext ────┤      │Filestash │          │         │
-│  ├──────────┤            │      │  :8334   │──── S3──▶│         │
-│  │ Writer   │─── ext ────┘      └──────────┘          │         │
-│  └──────────┘                                         │         │
-│       │                                               │         │
-│       └── each agent container has:                   │         │
-│           ARTIFACT_DB_URL  ───────────────────────────┘         │
-│           MINIO_ENDPOINT / ACCESS_KEY / SECRET_KEY              │
-│           AGENT_NAME (unchanged)                                │
-│           /workspace (ephemeral, named volume, unchanged)       │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│  docker-compose                                             │
+│                                                             │
+│  ┌──────────┐   DATABASE_URL    ┌──────────┐               │
+│  │ Paperclip│──────────────────▶│ Postgres │               │
+│  └──────────┘                   │ (2 DBs)  │               │
+│                                 │paperclip │               │
+│  ┌──────────┐                   │art_store │               │
+│  │ Aspire   │                   └──────────┘               │
+│  │Dashboard │                        ▲                     │
+│  └──────────┘                        │ Bun.sql             │
+│                                 ┌──────────┐               │
+│  ┌──────────┐    HTTP :8090     │ Artifact │  S3 API       │
+│  │   CEO    │──── ext ────────▶│ Service  │─────────┐     │
+│  ├──────────┤                   │ (Bun)    │         │     │
+│  │Researcher│──── ext ────────▶│          │    ┌────▼───┐ │
+│  ├──────────┤                   └──────────┘    │ MinIO  │ │
+│  │  Data    │──── ext ─────────────────────────▶│:9000 API│ │
+│  ├──────────┤                                   │:9001 UI│ │
+│  │ Writer   │──── ext ─────────────────────────▶└────────┘ │
+│  └──────────┘                                              │
+│                                                             │
+│  Each agent has:                                            │
+│    ARTIFACT_SERVICE_URL=http://artifact-service:8090        │
+│    AGENT_NAME (unchanged)                                   │
+│    /workspace (ephemeral, named volume, unchanged)          │
+│                                                             │
+└────────────────────────────────────────────────────────────┘
 ```
+
+Key change from v1 spec: agents no longer connect to Postgres or MinIO directly. The artifact service owns all storage interactions. Extensions are thin HTTP clients.
 
 ### New containers
 
@@ -108,10 +107,8 @@ postgres:
 ```
 
 Two databases in one instance:
-- `paperclip` — Paperclip's own schema, managed by Paperclip migrations on startup
+- `paperclip` — Paperclip's own schema, managed by Paperclip migrations
 - `artifact_store` — our schema, created by init script
-
-Postgres init scripts in `/docker-entrypoint-initdb.d/` run once on first volume creation. The init script creates the `artifact_store` database and applies the schema.
 
 #### minio
 
@@ -129,7 +126,7 @@ minio:
   volumes:
     - minio-data:/data
   healthcheck:
-    test: ["CMD", "mc", "ready", "local"]
+    test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
     interval: 5s
     timeout: 3s
     start_period: 10s
@@ -140,7 +137,7 @@ minio:
         memory: 256M
 ```
 
-Bucket creation handled by a one-shot init container (see minio-init below).
+Browse artifacts via MinIO Console at :9001. No separate file browser needed.
 
 #### minio-init
 
@@ -161,28 +158,54 @@ minio-init:
     MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}"
 ```
 
-Creates the `artifacts` bucket on first run. Exits after. No restart policy.
+Creates `artifacts` bucket. Exits after. No restart policy.
 
-Per-agent MinIO service accounts for RBAC layer 2 are created by setup.sh (see RBAC section).
-
-#### filestash
+#### artifact-service
 
 ```yaml
-filestash:
-  image: machines/filestash
+artifact-service:
+  build:
+    context: ./src/artifact-service
+    dockerfile: Dockerfile
   restart: unless-stopped
   ports:
-    - "8334:8334"
+    - "8090:8090"
+  environment:
+    PORT: 8090
+    DATABASE_URL: "postgres://artifact:${ARTIFACT_DB_PASSWORD:-artifact-eval}@postgres:5432/artifact_store"
+    MINIO_ENDPOINT: "http://minio:9000"
+    MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-minioadmin}"
+    MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+    MINIO_BUCKET: "artifacts"
   depends_on:
+    postgres:
+      condition: service_healthy
     minio:
       condition: service_healthy
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+    interval: 5s
+    timeout: 3s
+    start_period: 5s
+    retries: 3
   deploy:
     resources:
       limits:
-        memory: 256M
+        memory: 128M
 ```
 
-First-launch config: admin panel at `localhost:8334/admin`, add S3 backend pointing at `http://minio:9000` with root creds. Renders markdown, JSON, CSV, code with syntax highlighting inline. This is the artifact browser.
+Dockerfile:
+
+```dockerfile
+FROM oven/bun:alpine
+WORKDIR /app
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+COPY . .
+CMD ["bun", "run", "server.ts"]
+```
+
+Image size: ~60MB total. `oven/bun:alpine` base (~55MB) + `@aws-sdk/client-s3` + `ulid`.
 
 ### Changed containers
 
@@ -192,52 +215,50 @@ First-launch config: admin panel at `localhost:8334/admin`, add S3 backend point
 paperclip:
   # ... existing config ...
   environment:
-    # ... existing vars ...
     DATABASE_URL: "postgres://paperclip:${POSTGRES_PASSWORD:-paperclip-eval}@postgres:5432/paperclip"
   depends_on:
     postgres:
       condition: service_healthy
 ```
 
-Remove `paperclip-data` volume (no longer needed — data lives in shared Postgres). The embedded Postgres auto-disables when DATABASE_URL is set.
+Remove `paperclip-data` volume. Embedded Postgres auto-disables when DATABASE_URL is set.
 
 #### all agents
 
 ```yaml
 # remove from each agent:
-#   - ./artifacts:/artifacts          <-- replaced by MinIO
+#   - ./artifacts:/artifacts
 
-# add to each agent's env_file or environment:
-#   ARTIFACT_DB_URL=postgres://artifact:${ARTIFACT_DB_PASSWORD:-artifact-eval}@postgres:5432/artifact_store
-#   MINIO_ENDPOINT=http://minio:9000
-#   MINIO_ACCESS_KEY=<per-agent, created by setup.sh>
-#   MINIO_SECRET_KEY=<per-agent, created by setup.sh>
+# add to each agent's environment:
+#   ARTIFACT_SERVICE_URL=http://artifact-service:8090
 
 # add dependency:
 #   depends_on:
-#     postgres:
-#       condition: service_healthy
-#     minio:
+#     artifact-service:
 #       condition: service_healthy
 ```
+
+Agents no longer need `ARTIFACT_DB_URL`, `MINIO_ENDPOINT`, or MinIO credentials. Single env var points to the service.
 
 ### Removed
 
 - `./artifacts:/artifacts` bind mount from all agents
-- `./artifacts` host directory (no longer the source of truth)
+- `./artifacts` host directory (no longer source of truth)
 - `.meta.json` sidecar files (metadata moves to Postgres)
 - `paperclip-data` named volume (Paperclip now uses shared Postgres)
+- Direct Postgres/MinIO connections from agent containers
+- Filestash container (MinIO Console at :9001 covers browsing)
 
 ### Kept unchanged
 
-- Per-agent workspace named volumes (`ceo-workspace:/workspace`, etc.) — ephemeral scratch, not part of artifact store
+- Per-agent workspace named volumes (`ceo-workspace:/workspace`, etc.)
 - Aspire dashboard container
-- Template files at `/app/templates/` (COPYed into image, not stored in MinIO)
-- `get_template` tool (reads from local filesystem, no change)
+- Template files at `/app/templates/` (COPYed into image)
+- `get_template` tool (reads from local filesystem)
 
 ## Identifiers
 
-### ULID for artifact IDs and S3 keys
+### ULID only
 
 All artifact IDs are ULIDs — 26-character Crockford Base32, millisecond-precision, time-sortable, case-insensitive.
 
@@ -246,21 +267,13 @@ All artifact IDs are ULIDs — 26-character Crockford Base32, millisecond-precis
 ```
 
 Used as:
-- Primary identifier in artifact references
-- S3 key prefix within the type directory (ensures time-ordering in prefix scans)
-- Postgres column (`ulid TEXT NOT NULL UNIQUE`)
+- Primary key in Postgres (`TEXT NOT NULL PRIMARY KEY`)
+- S3 key prefix within the type directory
+- External reference in `artifact://` URIs
 
 Library: `ulid` npm package (single dep, 0 transitive deps, 1KB).
 
-### UUIDv7 for Postgres primary keys
-
-Postgres PKs use UUIDv7 — native `uuid` column type, RFC 9562, sequential insert performance.
-
-Library: `uuidv7` npm package or generate manually (timestamp + random bits in UUID format).
-
-### Why both
-
-ULID is shorter (26 vs 36 chars) and better for S3 keys where length matters. UUIDv7 fits Postgres's native `uuid` type without custom domains. The artifact record has both: `id` (UUIDv7, PK) and `ulid` (ULID, unique, used in S3 keys and external references).
+No UUIDv7. One ID scheme for everything. Postgres handles TEXT PKs fine. The marginal B-tree benefit of native UUID is irrelevant at eval scale.
 
 ## S3 Key Structure
 
@@ -271,13 +284,10 @@ ULID is shorter (26 vs 36 chars) and better for S3 keys where length matters. UU
 Examples:
 ```
 default/default/01JHX3YMKD.../researcher/dataset/01JHX3YMPP_competitors.csv
-default/default/01JHX3YMKD.../writer/report/01JHX3YNRR_market-analysis.md
-default/default/01JHX3YMKD.../qa/verdict/01JHX3YQTT_qa-pass.json
+default/default/01JHX3YMKD.../writer/content/01JHX3YNRR_market-analysis.md
 ```
 
-For eval, `company_id` and `project_id` default to "default" since we typically run one company/project. The hierarchy is ready for multi-tenant but doesn't impose overhead now.
-
-When Paperclip context is provided (issue_id, project_id, etc.), the extension resolves company and project from those. When not provided, defaults apply.
+`company_id` and `project_id` default to "default" for eval. Hierarchy ready for multi-tenant without imposing overhead now.
 
 ## Artifact URI Scheme
 
@@ -285,7 +295,7 @@ When Paperclip context is provided (issue_id, project_id, etc.), the extension r
 artifact://{company}/{project}/{run}/{agent}/{type}/{ulid}_{filename}
 ```
 
-Full reference object returned by `write_artifact` and passed between agents:
+Reference object returned by `write_artifact`:
 
 ```json
 {
@@ -300,109 +310,162 @@ Full reference object returned by `write_artifact` and passed between agents:
 }
 ```
 
-Agents include the `ref` string in Paperclip issue comments. Consuming agent passes the `ref` to `read_artifact` to resolve it.
-
 Resolution flow:
-1. Parse URI → extract S3 key components
-2. Check RBAC (does requesting agent have read access to this path?)
-3. Fetch blob from MinIO
-4. Return content + metadata from Postgres
+1. Extension sends URI to artifact service
+2. Service parses URI, checks RBAC, fetches blob from MinIO
+3. Returns content + metadata
 
-The `artifact://` scheme abstracts the storage backend. If MinIO moves to AWS S3, Neon, or anywhere else, agent prompts don't change.
+The `artifact://` scheme abstracts storage backend. If MinIO moves to S3 or elsewhere, agent prompts don't change.
+
+## Artifact Service
+
+### Stack
+
+- **Runtime**: Bun (oven/bun:alpine)
+- **HTTP**: `Bun.serve()` — native, no framework
+- **Postgres**: `Bun.sql` — built-in driver, speaks wire protocol, zero deps
+- **S3**: `@aws-sdk/client-s3` — PutObject, GetObject, ListObjectsV2
+- **IDs**: `ulid` npm package
+
+### Directory structure
+
+```
+src/artifact-service/
+  server.ts          Bun.serve() entry point, route dispatch
+  routes.ts          Route handlers (write, read, list, health)
+  storage.ts         MinIO client (S3 put/get/list)
+  metastore.ts       Postgres queries (insert/select/filter)
+  rbac.ts            RBAC check against rbac.json rules
+  uri.ts             artifact:// URI parse/format
+  types.ts           Shared TypeScript types
+  Dockerfile
+  package.json
+```
+
+### Routes
+
+```
+POST   /artifacts          Write artifact (body: multipart or JSON with content)
+GET    /artifacts/:id      Read artifact by ULID
+GET    /artifacts          List/filter artifacts (query params: agent, type, run_id)
+GET    /health             Healthcheck (Postgres + MinIO connectivity)
+```
+
+All routes require `X-Agent-Name` header. Service uses this for RBAC checks against `rbac.json`.
+
+#### POST /artifacts
+
+Request:
+```json
+{
+  "filename": "competitors.csv",
+  "content": "base64-encoded-content",
+  "type": "dataset",
+  "mime": "text/csv",
+  "summary": "47 competitors",
+  "run_id": "01JHX3YMKD...",
+  "paperclip": { "issue_id": "..." }
+}
+```
+
+Response:
+```json
+{
+  "ref": "artifact://default/default/01JHX.../researcher/dataset/01JHX..._competitors.csv",
+  "id": "01JHX3YMPP",
+  "size": 24576,
+  "hash": "sha256:a1b2c3..."
+}
+```
+
+Flow:
+1. Validate params, check RBAC (agent can write to own namespace)
+2. Generate ULID
+3. Compute SHA-256 of content
+4. Build S3 key, upload blob to MinIO
+5. INSERT metadata into Postgres
+6. Return artifact reference
+
+#### GET /artifacts/:id
+
+Request: ULID in path, `X-Agent-Name` header.
+
+Response: artifact content + metadata headers (`X-Artifact-Type`, `X-Artifact-Mime`, `X-Artifact-Hash`, `X-Artifact-Ref`).
+
+Flow:
+1. Lookup metadata in Postgres by ULID
+2. Check RBAC (requesting agent vs artifact path)
+3. Fetch blob from MinIO
+4. Stream content in response body
+
+#### GET /artifacts
+
+Request: query params for filtering.
+
+```
+?agent=researcher&type=dataset&run_id=01JHX...&limit=50
+```
+
+Response: JSON array of artifact metadata (no content bodies).
+
+#### GET /health
+
+Response: `{ "status": "ok", "postgres": true, "minio": true }`
+
+### Connection management
+
+`Bun.sql` manages its own connection pool. Set `max: 5` — single service, single consumer, 256MB Postgres. S3 client reuses HTTP connections by default.
 
 ## Metastore Schema
 
 File: `scripts/init-artifact-db.sql`
 
 ```sql
--- Run by Postgres entrypoint on first init
 CREATE DATABASE artifact_store;
 \connect artifact_store;
 
-CREATE TABLE artifact_types (
-    id              TEXT PRIMARY KEY,
-    description     TEXT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-INSERT INTO artifact_types (id, description) VALUES
-    ('research',  'Research findings, source analysis'),
-    ('analysis',  'Data analysis, trend reports'),
-    ('content',   'Written content, articles, posts'),
-    ('dataset',   'Structured data, CSV, JSON collections'),
-    ('code',      'Code artifacts, scripts, configs'),
-    ('verdict',   'QA pass/fail verdicts'),
-    ('receipt',   'Publish receipts, confirmation records'),
-    ('brief',     'Task briefs, directives, specs')
-ON CONFLICT DO NOTHING;
-
 CREATE TABLE artifacts (
-    id              UUID PRIMARY KEY,
-    ulid            TEXT NOT NULL UNIQUE,
+    id              TEXT PRIMARY KEY,          -- ULID
     company_id      TEXT NOT NULL DEFAULT 'default',
     project_id      TEXT NOT NULL DEFAULT 'default',
     run_id          TEXT,
     agent_name      TEXT NOT NULL,
-    artifact_type   TEXT NOT NULL REFERENCES artifact_types(id),
+    artifact_type   TEXT NOT NULL CHECK (artifact_type IN (
+                        'research', 'analysis', 'content', 'dataset',
+                        'code', 'verdict', 'receipt', 'brief'
+                    )),
     filename        TEXT NOT NULL,
     s3_bucket       TEXT NOT NULL DEFAULT 'artifacts',
     s3_key          TEXT NOT NULL UNIQUE,
     content_hash    TEXT,
     size_bytes      BIGINT,
     mime_type       TEXT,
-    version         INTEGER NOT NULL DEFAULT 1,
-    parent_id       UUID REFERENCES artifacts(id),
+    summary         TEXT,
     metadata        JSONB NOT NULL DEFAULT '{}',
     paperclip       JSONB NOT NULL DEFAULT '{}',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at      TIMESTAMPTZ
 );
 
-CREATE TABLE artifact_lineage (
-    id              UUID PRIMARY KEY,
-    source_id       UUID NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
-    target_id       UUID NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
-    relationship    TEXT NOT NULL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE(source_id, target_id, relationship)
-);
-
-CREATE TABLE executions (
-    id              UUID PRIMARY KEY,
-    run_id          TEXT,
-    agent_name      TEXT NOT NULL,
-    tool_name       TEXT,
-    trace_id        TEXT,
-    started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    ended_at        TIMESTAMPTZ,
-    status          TEXT NOT NULL DEFAULT 'running',
-    metadata        JSONB NOT NULL DEFAULT '{}'
-);
-
-CREATE TABLE execution_artifacts (
-    execution_id    UUID NOT NULL REFERENCES executions(id) ON DELETE CASCADE,
-    artifact_id     UUID NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
-    role            TEXT NOT NULL,
-    PRIMARY KEY (execution_id, artifact_id, role)
-);
-
--- Indexes
-CREATE INDEX idx_artifacts_ulid ON artifacts(ulid);
 CREATE INDEX idx_artifacts_run ON artifacts(run_id);
 CREATE INDEX idx_artifacts_agent ON artifacts(agent_name);
 CREATE INDEX idx_artifacts_type ON artifacts(artifact_type);
 CREATE INDEX idx_artifacts_hash ON artifacts(content_hash);
 CREATE INDEX idx_artifacts_company_project ON artifacts(company_id, project_id);
 CREATE INDEX idx_artifacts_created ON artifacts(created_at DESC);
-CREATE INDEX idx_lineage_source ON artifact_lineage(source_id);
-CREATE INDEX idx_lineage_target ON artifact_lineage(target_id);
-CREATE INDEX idx_executions_run ON executions(run_id);
-CREATE INDEX idx_executions_agent ON executions(agent_name);
 ```
+
+Changes from v1 spec:
+- ULID as TEXT primary key (no UUIDv7, no dual ID)
+- CHECK constraint replaces `artifact_types` lookup table
+- `summary` promoted to column (was buried in metadata JSONB)
+- No `version`, `parent_id` columns (no versioning in eval)
+- No `artifact_lineage`, `executions`, `execution_artifacts` tables (no consumer yet)
+- Fewer indexes (dropped redundant ULID index — it's the PK)
 
 ### paperclip JSONB column
 
-Stores Paperclip-specific context without polluting the core schema:
+Stores Paperclip-specific context without polluting core schema:
 
 ```json
 {
@@ -413,163 +476,77 @@ Stores Paperclip-specific context without polluting the core schema:
 }
 ```
 
-Same fields as the v1 sidecar's `paperclip` object. Queryable via Postgres JSONB operators.
-
-### Content-addressable hashing
-
-SHA-256 of artifact content, stored in `content_hash`. Enables:
-- Dedup: skip upload if hash matches existing artifact (return existing reference)
-- Integrity: verify after download
-- Change detection: "did this artifact change?" without downloading
+Queryable via Postgres JSONB operators.
 
 ## RBAC Model
 
-### Layer 1: Application-layer (in extension)
+Single layer. Application-level only. No MinIO IAM policies for eval.
 
-RBAC config per agent, loaded from environment or a shared config file.
+All agents use the same MinIO credentials (root). The artifact service enforces access control before touching MinIO. Defense-in-depth via MinIO IAM is a production concern.
+
+Config file: `src/agents/rbac.json`
 
 ```json
 {
   "ceo": {
     "read": ["*"],
-    "write": ["ceo/**"],
-    "delete": []
+    "write": ["ceo/**"]
   },
   "researcher": {
     "read": ["researcher/**", "ceo/**/brief/**"],
-    "write": ["researcher/**"],
-    "delete": []
+    "write": ["researcher/**"]
   },
   "data": {
     "read": ["data/**", "researcher/**/dataset/**"],
-    "write": ["data/**"],
-    "delete": []
+    "write": ["data/**"]
   },
   "writer": {
     "read": ["writer/**", "researcher/**/research/**", "data/**/dataset/**"],
-    "write": ["writer/**"],
-    "delete": []
+    "write": ["writer/**"]
   },
   "qa": {
     "read": ["*"],
-    "write": ["qa/**"],
-    "delete": []
+    "write": ["qa/**"]
   },
   "coder": {
     "read": ["coder/**", "ceo/**/brief/**"],
-    "write": ["coder/**"],
-    "delete": []
-  },
-  "publisher": {
-    "read": ["publisher/**", "qa/**/verdict/**", "writer/**/content/**"],
-    "write": ["publisher/**"],
-    "delete": []
+    "write": ["coder/**"]
   }
 }
 ```
 
 Rules:
 - Agents always write to their own namespace
-- Read patterns are explicit — enumerate upstream agent types the role needs
+- Read patterns are explicit — enumerate upstream types the role needs
 - CEO and QA get `*` read (oversight roles)
-- No agent gets delete (eval stage — artifacts are append-only)
+- No delete (append-only in eval)
 - Glob matching against the S3 key path (after company/project/run prefix)
+- Agent identity from `X-Agent-Name` header (trusted — Docker network only)
 
-Config file: `src/agents/rbac.json`. Loaded by artifacts extension on init. Override per-agent via `ARTIFACT_RBAC_ROLE` env var (defaults to AGENT_NAME).
+## Extension Changes
 
-### Layer 2: MinIO IAM policies (defense-in-depth)
+### artifacts.ts becomes thin HTTP client
 
-Per-agent MinIO service accounts created by setup.sh. Each account gets an IAM policy that mirrors layer 1 at the S3 prefix level.
-
-Example for researcher:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:ListBucket"],
-      "Resource": [
-        "arn:aws:s3:::artifacts/*/researcher/*",
-        "arn:aws:s3:::artifacts/*/ceo/*/brief/*"
-      ]
-    },
-    {
-      "Effect": "Allow",
-      "Action": ["s3:PutObject"],
-      "Resource": "arn:aws:s3:::artifacts/*/researcher/*"
-    }
-  ]
-}
-```
-
-Service account credentials go into per-agent `.env` files (MINIO_ACCESS_KEY, MINIO_SECRET_KEY). Created by setup.sh alongside Paperclip API keys.
-
-Even if the application-layer RBAC has a bug, MinIO rejects unauthorized access at the storage level.
-
-## Tool Interface Changes
-
-### write_artifact
-
-Parameters: unchanged. Same signature as v1.
-
-Return value changes:
+v2 `artifacts.ts` drops all filesystem logic, Postgres logic, and S3 logic. It becomes an HTTP client calling the artifact service. Same pattern as `skills/client.ts` calling Paperclip's REST API.
 
 ```
-v1: { path: "/artifacts/researcher/output/findings.md", metadata_path: "...meta.json", size_bytes: N }
-v2: { ref: "artifact://default/default/01JHX.../researcher/research/01JHX..._findings.md",
-      id: "01JHX3YMPP", size_bytes: N, hash: "sha256:..." }
+src/agents/extensions/artifacts.ts    (~100 lines, down from 354)
 ```
 
-The `ref` is the artifact URI. Agents pass this in messages. The `path` field is gone — there is no filesystem path. The `metadata_path` is gone — metadata lives in Postgres.
+Responsibilities:
+- Register 4 tools with Pi (unchanged tool names and parameter signatures)
+- `write_artifact`: serialize params, POST to artifact service, return ref
+- `read_artifact`: send URI to artifact service GET, return content + metadata
+- `list_artifacts`: send filters to artifact service GET, format results
+- `get_template`: read from local `/app/templates/` (unchanged)
 
-Internal flow:
-1. Validate params (name, content, type — same as v1)
-2. Generate ULID
-3. Compute SHA-256 of content
-4. Check dedup: query Postgres for matching hash + agent + type. If found, return existing ref.
-5. Build S3 key from context (company/project/run/agent/type/ulid_filename)
-6. Upload blob to MinIO
-7. INSERT metadata into Postgres artifacts table
-8. Return artifact reference
+No direct imports of `pg`, `@aws-sdk/client-s3`, or `ulid` in extension code. Single dependency: `ARTIFACT_SERVICE_URL` env var.
 
-### read_artifact
+### Return value change (breaking, acknowledged)
 
-Parameters: accepts both old-style paths and `artifact://` URIs.
+`write_artifact` return changes from `{ path, metadata_path, size_bytes }` to `{ ref, id, size, hash }`. This is a breaking change. Agent prompts reference `ref` instead of `path` going forward. The promptSnippet update handles this — agents learn to pass URIs.
 
-```typescript
-read_artifact({
-  path: string  // "artifact://..." URI or legacy "/artifacts/..." path
-})
-```
-
-Legacy path support: if input starts with `/artifacts/`, map it to an S3 key lookup. This provides backward compatibility during migration but logs a deprecation warning.
-
-Internal flow:
-1. Parse input — URI or legacy path
-2. Resolve to S3 key
-3. Check RBAC (requesting agent vs S3 key path)
-4. Fetch blob from MinIO
-5. Fetch metadata from Postgres
-6. Return content + metadata
-
-### list_artifacts
-
-Parameters: unchanged. Same filters.
-
-Return value: includes `ref` URIs instead of filesystem paths.
-
-```
-v1: "- /artifacts/researcher/output/findings.md"
-v2: "- artifact://default/.../researcher/research/01JHX..._findings.md"
-```
-
-Internal: queries Postgres instead of walking directories. Faster, filterable, sorted by index.
-
-### get_template
-
-No change. Templates are static files in the container image, not stored in the artifact store. Reads from `/app/templates/` as before.
+No legacy `/artifacts/...` path support. Clean break. No backward compat shim for an eval system.
 
 ## promptSnippet Update
 
@@ -585,72 +562,72 @@ When sharing work with other agents or referencing artifacts:
 
 ## Workspace vs Artifact Store
 
-These are distinct systems with distinct lifecycles:
-
 | | Workspace | Artifact Store |
 |---|---|---|
 | Mount | `/workspace` (named Docker volume) | MinIO bucket (network) |
 | Scope | Per-agent, private | Shared, RBAC-controlled |
-| Lifecycle | Ephemeral — survives container restart, wipeable | Durable — survives stack teardown |
-| Contents | Tool outputs, drafts, temp files, git worktrees | Final deliverables, published data |
+| Lifecycle | Ephemeral — survives restart, wipeable | Durable — survives stack teardown |
+| Contents | Drafts, temp files, tool outputs | Final deliverables, published data |
 | Access | Only the owning agent | Cross-agent via artifact tools |
-| Browsable | Not externally (inside container only) | Filestash at :8334, MinIO console at :9001 |
+| Browsable | Inside container only | MinIO Console at :9001 |
 
-The transition: agent works in `/workspace`, calls `write_artifact` when output is final. The extension uploads to MinIO and registers in Postgres. The workspace is never shared; the artifact store is always shared.
+## Dependencies
 
-## Dependencies Added to Extension
+### Artifact service (`src/artifact-service/package.json`)
 
 ```
 @aws-sdk/client-s3    — S3 API client (PutObject, GetObject, ListObjectsV2)
-pg                    — Postgres client (no ORM, parameterized queries)
 ulid                  — ULID generation
 ```
 
-These install in the agent Docker image. Added to Dockerfile's npm install step or bundled with the extension. Total added: ~5MB compressed.
+`Bun.sql` is built-in — no Postgres driver dep. `Bun.serve()` is built-in — no HTTP framework dep.
 
-## Environment Variables (new)
+### Agent extension
+
+No new deps. Uses `fetch()` (available in Node and Pi runtime) to call artifact service.
+
+## Environment Variables
 
 Added to `.env.example`:
 
 ```bash
 # Postgres (shared instance for Paperclip + artifact store)
 POSTGRES_PASSWORD=paperclip-eval
+ARTIFACT_DB_PASSWORD=artifact-eval
 
 # MinIO (S3-compatible object store)
 MINIO_ROOT_USER=minioadmin
 MINIO_ROOT_PASSWORD=minioadmin
-
-# Artifact store (per-agent — written by setup.sh into agent .env files)
-# ARTIFACT_DB_URL=postgres://artifact:artifact-eval@postgres:5432/artifact_store
-# MINIO_ENDPOINT=http://minio:9000
-# MINIO_ACCESS_KEY=<per-agent service account>
-# MINIO_SECRET_KEY=<per-agent service account>
 ```
+
+Per-agent `.env` (written by setup.sh):
+
+```bash
+# Artifact service (same for all agents)
+ARTIFACT_SERVICE_URL=http://artifact-service:8090
+```
+
+Agents no longer need individual MinIO credentials or database URLs.
 
 ## setup.sh Changes
 
-Setup.sh gains new responsibilities:
+Simpler than v1 spec. No MinIO service accounts to create.
 
-1. Wait for Postgres healthcheck (already waits for Paperclip, same pattern)
+1. Wait for Postgres healthcheck
 2. Wait for MinIO healthcheck
-3. Create MinIO `artifacts` bucket if not exists (backup to minio-init container)
-4. For each agent:
-   a. Create MinIO service account with IAM policy matching rbac.json
-   b. Write MINIO_ACCESS_KEY and MINIO_SECRET_KEY to agent's `.env` file
-   c. Write ARTIFACT_DB_URL to agent's `.env` file
+3. Wait for artifact service healthcheck
+4. For each agent: write `ARTIFACT_SERVICE_URL` to agent's `.env` file
 5. Existing Paperclip setup (company, agents, API keys) unchanged
 
 ## Migration Path
 
-### From v1 (bind mount + sidecars) to v2 (MinIO + Postgres)
-
-1. Add new containers to docker-compose (postgres, minio, minio-init, filestash)
+1. Add new containers to docker-compose (postgres, minio, minio-init, artifact-service)
 2. Point Paperclip at external Postgres via DATABASE_URL
-3. Deploy updated artifacts.ts extension
+3. Deploy updated artifacts.ts extension (HTTP client version)
 4. Remove `./artifacts:/artifacts` bind mount from agents
-5. Optional: migrate existing artifacts from `./artifacts/` directory into MinIO via `mc cp --recursive ./artifacts/ store/artifacts/default/default/migrated/`
+5. `docker compose up -d` — clean start
 
-No data migration required for eval. Existing artifacts in `./artifacts/` can be browsed on disk. New artifacts go to MinIO. Clean break.
+No data migration for eval. Existing `./artifacts/` directory stays on disk for reference. New artifacts go through artifact service to MinIO. Clean break.
 
 ## Port Allocation Summary
 
@@ -658,9 +635,9 @@ No data migration required for eval. Existing artifacts in `./artifacts/` can be
 |---------|------|---------|
 | Paperclip | 3100 | Paperclip UI + API |
 | Postgres | 5432 | Database (Paperclip + artifact metadata) |
-| MinIO API | 9000 | S3 API (agent access) |
-| MinIO Console | 9001 | MinIO management UI |
-| Filestash | 8334 | Artifact file browser (markdown/JSON/CSV rendering) |
+| MinIO API | 9000 | S3 API (artifact service access) |
+| MinIO Console | 9001 | MinIO management UI + artifact browser |
+| Artifact Service | 8090 | Artifact REST API |
 | Aspire Dashboard | 18888 | OTel traces + logs |
 | CEO bridge | 8081 | Agent HTTP adapter |
 | Researcher bridge | 8082 | Agent HTTP adapter |
@@ -669,23 +646,21 @@ No data migration required for eval. Existing artifacts in `./artifacts/` can be
 
 ## Definition of Done
 
-- [ ] `scripts/init-artifact-db.sql` creates artifact_store database and schema
-- [ ] docker-compose.yml has postgres, minio, minio-init, filestash containers
+- [ ] `scripts/init-artifact-db.sql` creates artifact_store database and schema (single table + indexes)
+- [ ] `src/artifact-service/` implements Bun service with 4 routes (write, read, list, health)
+- [ ] `src/artifact-service/Dockerfile` builds on `oven/bun:alpine`
+- [ ] docker-compose.yml has postgres, minio, minio-init, artifact-service containers
 - [ ] Paperclip container uses DATABASE_URL pointing to shared Postgres
 - [ ] Paperclip starts and runs correctly on external Postgres
 - [ ] `./artifacts:/artifacts` bind mount removed from all agents
 - [ ] `.env.example` has all new env vars documented
-- [ ] `src/agents/rbac.json` defines per-agent read/write/delete rules
-- [ ] `artifacts.ts` rewritten: MinIO for blobs, Postgres for metadata, ULID IDs, SHA-256 hashing
+- [ ] `src/agents/rbac.json` defines per-agent read/write rules
+- [ ] `artifacts.ts` rewritten as thin HTTP client calling artifact service
 - [ ] `write_artifact` returns `artifact://` URI references
-- [ ] `read_artifact` resolves `artifact://` URIs and checks RBAC
-- [ ] `list_artifacts` queries Postgres instead of walking filesystem
+- [ ] `read_artifact` resolves `artifact://` URIs via artifact service
+- [ ] `list_artifacts` queries artifact service instead of walking filesystem
 - [ ] `get_template` unchanged (still reads local filesystem)
-- [ ] Legacy `/artifacts/...` path input in read_artifact maps to S3 key with deprecation warning
 - [ ] promptSnippet updated to reference URIs instead of filesystem paths
-- [ ] setup.sh creates MinIO service accounts with per-agent IAM policies
-- [ ] setup.sh writes MINIO_ACCESS_KEY, MINIO_SECRET_KEY, ARTIFACT_DB_URL to agent .env files
-- [ ] Filestash accessible at :8334, configured to browse MinIO artifacts bucket
 - [ ] `docker compose up -d` brings up full stack from clean state
 - [ ] Existing tests updated or replaced for v2 behavior
 - [ ] CLAUDE.md and ROADMAP.md updated to reflect new architecture
@@ -694,33 +669,34 @@ No data migration required for eval. Existing artifacts in `./artifacts/` can be
 
 What must not change:
 - Tool names and parameter signatures (write_artifact, read_artifact, list_artifacts, get_template)
-- Per-agent workspace volumes (`/workspace`) — these are not part of the artifact store
-- Bridge.mjs — no changes needed, extension loading is the same (`-e /app/extensions/artifacts.ts`)
-- Agent prompts in AGENTS.md — promptSnippet handles the behavioral change automatically
-- Template system — continues to read from `/app/templates/` in the container image
+- Per-agent workspace volumes (`/workspace`)
+- Bridge.mjs — extension loading unchanged (`-e /app/extensions/artifacts.ts`)
+- Template system — reads from `/app/templates/` in container image
 
 What is explicitly out of scope:
-- Centralized artifact service container (future — when RBAC needs to be enforced at network level)
-- Artifact versioning UI (MinIO Console shows object versions if versioning is enabled, but not in v2 scope)
-- Lineage tracking in the extension (tables exist in schema, populated manually or by future tooling)
+- Lineage/provenance tracking (add tables when something consumes them)
+- Execution tracking tables
+- Artifact versioning
+- MinIO IAM policies / per-agent service accounts (production concern)
+- Content-addressable dedup (add when duplicate storage costs matter)
+- Legacy `/artifacts/...` path backward compatibility
 - Artifact deletion tools (append-only in eval)
-- Presigned URL generation for external access (eval is all internal Docker network)
-- Git sync of artifacts (deferred per ROADMAP.md)
+- Presigned URL generation
+- Filestash or separate file browser (MinIO Console is sufficient)
 
 What decisions are reserved for human review:
-- Whether to enable MinIO bucket versioning (storage cost tradeoff)
-- Filestash admin credentials and access policy
-- Whether to expose Postgres port 5432 to host (currently yes for debugging, may want to restrict)
-- RBAC rule changes (additions to rbac.json require human review)
+- Whether to expose Postgres port 5432 to host (currently yes for debugging)
+- RBAC rule changes (additions to rbac.json)
+- Adding new artifact types to CHECK constraint
 
 ## Open Questions
 
-None. Spec is complete for implementation.
+None.
 
 ## Risks
 
-1. **Paperclip on external Postgres** — first time running this config. If Paperclip migrations fail or behave differently, fallback is reverting to embedded Postgres (remove DATABASE_URL, restore paperclip-data volume).
+1. **Paperclip on external Postgres** — first time running this config. Fallback: revert to embedded Postgres (remove DATABASE_URL, restore paperclip-data volume).
 
-2. **Extension dependency size** — `@aws-sdk/client-s3` is ~5MB. Adds to image size. Acceptable for eval, monitor if it pulls unexpected transitive deps.
+2. **Bun.sql maturity** — built-in since Bun 1.2, well-tested for basic CRUD. Our queries are simple (INSERT, SELECT with WHERE, no CTEs or window functions). Low risk. Fallback: swap to `postgres` (porsager) npm package with no other changes.
 
-3. **Filestash first-run config** — requires manual S3 backend setup in admin panel. Not automatable without API. Document the 3-click setup in README or setup.sh output.
+3. **Extension dep on artifact service availability** — if service is down, all artifact tools fail. Healthcheck + restart policy mitigates. Extension should return clear error ("artifact service unavailable") not cryptic fetch failures.

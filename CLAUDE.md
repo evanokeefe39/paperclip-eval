@@ -107,6 +107,7 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - Per-agent config in `src/agents/{name}/.env` — Paperclip credentials (API key, agent ID, company ID) plus agent-specific overrides (PI_PROVIDER, BRIDGE_TIMEOUT_MS, etc.)
 - docker-compose loads both root `.env` (shared API keys) and per-agent `.env` (Paperclip identity + overrides)
 - Agent API keys created automatically by setup.sh via `POST /api/agents/{id}/keys`, tokens prefixed `pcp_`
+- `docker compose restart` does NOT reload env vars — use `docker compose up -d <service>` to pick up changes (see LEARNING.md)
 
 ## Paperclip skills (platform tools)
 

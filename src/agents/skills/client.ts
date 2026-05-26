@@ -10,7 +10,6 @@ export async function request(method: string, path: string, body?: unknown, sign
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${PAPERCLIP_API_KEY}`,
-      "Origin": PAPERCLIP_API_URL,
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     ...(signal ? { signal } : {}),

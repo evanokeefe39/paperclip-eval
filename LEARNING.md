@@ -789,6 +789,10 @@ setup.sh skipped API key creation if any `pcp_` key existed in the agent `.env` 
 
 Paperclip's auth (Better Auth) validates browser request origins against `PAPERCLIP_PUBLIC_URL`. Setting it to the Docker-internal hostname (`http://paperclip:3100`) causes "Invalid origin" errors in the browser. Must be set to `http://localhost:3100` to match browser origin.
 
+### docker compose restart does not reload env vars
+
+`docker compose restart <service>` restarts the existing container process but does NOT re-read `docker-compose.yml` or `.env` files. If you change an env var in docker-compose.yml or any `env_file`, you must use `docker compose up -d <service>` to recreate the container. `restart` only sends SIGTERM/SIGSTART to the running container with its original environment. This has caused multiple debugging dead-ends where env changes appeared to have no effect.
+
 ### Remaining open issues
 
-See `tasks/issues/` — `yelp-selectors-stale.md` and `t4-apify-untested.md`.
+See `tasks/issues/`.

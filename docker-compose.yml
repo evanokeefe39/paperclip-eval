@@ -32,7 +32,8 @@ services:
     environment:
       HOST: "0.0.0.0"
       PAPERCLIP_HOME: "/paperclip"
-      PAPERCLIP_PUBLIC_URL: "http://localhost:3100"
+      PAPERCLIP_PUBLIC_URL: "http://paperclip:3100"
+      BETTER_AUTH_TRUSTED_ORIGINS: "http://paperclip:3100,http://localhost:3100"
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-paperclip-eval-secret-change-me}"
       PAPERCLIP_DEPLOYMENT_MODE: "authenticated"
       PAPERCLIP_DEPLOYMENT_EXPOSURE: "private"
