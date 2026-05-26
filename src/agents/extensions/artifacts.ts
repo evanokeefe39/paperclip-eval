@@ -137,7 +137,11 @@ export default function (pi: ExtensionAPI) {
         if (!params.type?.trim()) throw new Error("type is required and must be non-empty");
 
         const subdir = params.subdirectory || "output";
-        const filePath = path.join(ARTIFACTS_ROOT, AGENT_NAME, subdir, params.name);
+        const filePath = path.resolve(path.join(ARTIFACTS_ROOT, AGENT_NAME, subdir, params.name));
+        const agentRoot = path.join(ARTIFACTS_ROOT, AGENT_NAME);
+        if (!filePath.startsWith(agentRoot + path.sep) && filePath !== agentRoot) {
+          throw new Error(`Write rejected: path "${filePath}" escapes agent namespace "${agentRoot}"`);
+        }
         const metaPath = filePath + ".meta.json";
 
         ensureDir(path.dirname(filePath));

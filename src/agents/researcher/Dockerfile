@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
-RUN pip3 install --break-system-packages scrapling
+RUN pip3 install --break-system-packages "scrapling[fetchers]"
 RUN npm install -g cheerio
 
 WORKDIR /app
