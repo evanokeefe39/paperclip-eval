@@ -154,7 +154,7 @@ done
 
 # --- Validate docker-compose.yml references match agent.json ---
 begin_test "docker-compose.yml service names match agent directories"
-COMPOSE="$AGENTS_DIR/docker-compose.yml"
+COMPOSE="$REPO_ROOT/docker-compose.yml"
 if [ ! -f "$COMPOSE" ]; then
     fail "docker-compose.yml not found"
 else

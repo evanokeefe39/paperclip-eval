@@ -26,12 +26,13 @@ async function authenticate(): Promise<string> {
   return cached.cookie;
 }
 
-export async function request(method: string, path: string, body?: unknown): Promise<unknown> {
+export async function request(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
   const cookie = await authenticate();
   const res = await fetch(`${PAPERCLIP_API_URL}/api${path}`, {
     method,
     headers: { "Content-Type": "application/json", Origin: PAPERCLIP_API_URL, Cookie: cookie },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(signal ? { signal } : {}),
   });
   const text = await res.text();
   if (!res.ok) throw new Error(`${method} /api${path}: ${res.status} ${text}`);

@@ -1,7 +1,6 @@
 .env
 .env.*
 !.env.example
-docker-compose.yml
 setup.sh
 setup.ps1
 bootstrap-invite.cjs

@@ -295,6 +295,18 @@ Recommended execution: 1.4 → 1.1 → 1.2 → 1.3 → 1.5, then 2.1 → 2.2/2.3
 - [x] Selectors that failed due to parser differences now pass (cheerio verified on T2: HN, GitHub, Amazon, Indeed)
 - [x] NODE_PATH set in Dockerfiles
 
+## Campaign Results (2026-05-26, post-redesign)
+
+10/15 passed, 0 failed, 5 skipped.
+Full results matrix and skip analysis in `tasks/specs/ext-web-scrape.md`.
+
+Bugs found during campaign:
+1. Stale container images (old scripts still in Docker, rebuilt to fix)
+2. ARG_MAX in cheerio_parse (HTML as CLI arg, switched to stdin piping)
+3. Missing HTTP error reporting in Python scripts (403 showed as EMPTY not BLOCK)
+
+T2 parser-difference verified: HN, GitHub, Amazon, Indeed all T2=PASS with cheerio. No more Scrapling CSS vs cheerio divergence.
+
 ## Out of scope
 
 - T4 Apify testing (requires token, separate effort)

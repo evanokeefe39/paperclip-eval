@@ -649,7 +649,7 @@ echo ""
 echo "[Section 11] Container Smoke Test"
 
 begin_test "Skills directory exists in researcher container"
-SKILLS_LS=$(docker compose -f "$REPO_ROOT/src/agents/docker-compose.yml" \
+SKILLS_LS=$(docker compose -f "$REPO_ROOT/docker-compose.yml" \
     exec -T researcher ls /app/skills/ 2>/dev/null)
 if echo "$SKILLS_LS" | grep -q "paperclip-tools.ts"; then
     log "paperclip-tools.ts found in container"
@@ -667,7 +667,7 @@ else
 fi
 
 begin_test "Bridge loads paperclip-tools extension"
-BRIDGE_SRC=$(docker compose -f "$REPO_ROOT/src/agents/docker-compose.yml" \
+BRIDGE_SRC=$(docker compose -f "$REPO_ROOT/docker-compose.yml" \
     exec -T researcher cat /app/bridge.mjs 2>/dev/null)
 if echo "$BRIDGE_SRC" | grep -q "paperclip-tools"; then
     log "bridge.mjs references paperclip-tools"

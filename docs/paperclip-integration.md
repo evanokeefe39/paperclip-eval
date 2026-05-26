@@ -86,6 +86,15 @@ Paperclip runs in `authenticated` mode with `private` exposure:
 | /api/invites/{token}/accept               | POST   | Accept bootstrap invite     |
 | /api/companies                            | POST   | Create company              |
 | /api/companies/{id}/agent-hires           | POST   | Register agent              |
+| /api/companies/{cid}/secrets              | POST   | Create encrypted secret     |
+| /api/plugins/{id}/config                  | POST   | Configure installed plugin  |
+
+### Used by plugin tools (agent runtime)
+
+| Endpoint                                  | Method | Purpose                     |
+|-------------------------------------------|--------|-----------------------------|
+| /api/plugins/tools                        | GET    | Discover plugin-registered tools |
+| /api/plugins/tools/execute                | POST   | Invoke a plugin tool        |
 
 ### Used by Paperclip skills extension (agent runtime)
 
@@ -178,7 +187,7 @@ Tool paths match the upstream MCP server source at `packages/mcp-server/src/tool
 
 ### Environment variables
 
-Same as the escalate extension — already configured per-container in docker-compose.yml:
+Same as the escalate v2 extension — already configured per-container in docker-compose.yml:
 
 | Variable | Purpose |
 |----------|---------|
@@ -194,6 +203,113 @@ If any of the three auth vars (URL, email, password) are missing, the extension 
 
 - Unit tests: `node tests/paperclip-tools/unit-test.mjs` (162 tests against fake HTTP server)
 - Integration tests: `bash tests/paperclip-tools/integration-test.sh` (requires live Docker stack)
+
+## Plugins
+
+Paperclip supports a plugin system where community or first-party plugins run inside the Paperclip server process. Plugins register tools via the `agent.tools.register` capability, subscribe to platform events (issue creation, approval lifecycle, agent errors), and extend the UI with custom views.
+
+Plugin tools are server-side only. They are not injected into HTTP adapter wake payloads. This means HTTP adapter agents (our setup) cannot call plugin tools through the normal tool-calling flow that local adapters enjoy.
+
+### How local adapter agents access plugin tools
+
+For agents using a local adapter (claude_local, pi_local), Paperclip delivers plugin knowledge through managed "skills" — prompt and script packages installed at `~/.pi/agent/skills/` inside the agent process. The skill prompt describes the tool interface; the script handles the call. This is automatic and requires no configuration beyond installing the plugin.
+
+### How HTTP adapter agents access plugin tools
+
+HTTP adapter agents must call two REST endpoints directly:
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| /api/plugins/tools | GET | Returns all tools registered by all active plugins, including input schemas |
+| /api/plugins/tools/execute | POST | Invokes a specific plugin tool |
+
+The execute endpoint accepts a JSON body:
+
+```json
+{
+  "tool": "{pluginId}:tool_name",
+  "parameters": { ... },
+  "runContext": {
+    "agentId": "...",
+    "issueId": "...",
+    "companyId": "..."
+  }
+}
+```
+
+The tool name is prefixed with the plugin's UUID and a colon. The `runContext` provides the calling agent's identity and current issue so the plugin can act on behalf of that agent.
+
+In this project, the `skills/client.ts` shared API client handles authentication for these calls using the same session-cookie mechanism used by the Paperclip skills extension.
+
+## Discord Plugin
+
+### Overview
+
+`paperclip-plugin-discord` (v0.7.3, by mvanhorn) is installed in the Paperclip instance with plugin ID `60ba54d5-e922-43b9-bd50-a72130e0c017`. It bridges Paperclip's coordination layer to Discord, providing human-in-the-loop escalation via Discord threads, interactive buttons for approvals and confirmations, and automatic event notifications.
+
+### Plugin lifecycle
+
+The plugin transitions through three states:
+
+1. **installed** -- plugin code loaded, no config
+2. **ready** -- valid config applied, not yet connected
+3. **active** -- Discord gateway connection established, tools available
+
+### Configuration
+
+Configuration is applied via `POST /api/plugins/{id}/config` with a JSON body containing `configJson`:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| discordBotTokenRef | yes | Secret UUID referencing an encrypted Discord bot token |
+| defaultChannelId | yes | Discord channel ID for general notifications |
+| defaultGuildId | no | Discord server (guild) ID |
+| escalationChannelId | no | Dedicated channel for escalation threads |
+| approvalsChannelId | no | Dedicated channel for approval requests |
+| errorsChannelId | no | Dedicated channel for agent error alerts |
+| paperclipBoardApiKeyRef | no | Secret UUID for API key (needed in authenticated mode) |
+
+Secrets are created via `POST /api/companies/{cid}/secrets` with the plaintext value. Paperclip encrypts the value and returns a UUID. That UUID is used as the `*Ref` value in plugin config.
+
+### Event subscriptions
+
+The plugin subscribes to Paperclip platform events and posts Discord embeds automatically:
+
+- `issue.created` -- new issue notification with assignee and priority
+- `approval.created` -- approval request with accept/reject buttons
+- `agent.error` -- error alert with stack trace summary
+
+### Plugin tools
+
+The plugin registers the following tools (accessible via `/api/plugins/tools/execute`):
+
+| Tool | Purpose |
+|------|---------|
+| `escalate_to_human` | Creates a Discord thread with conversation context, suggested replies, and interactive buttons. Supports configurable timeout. |
+
+Human replies in Discord threads are relayed back as Paperclip issue comments. The agent is woken via the `PAPERCLIP_WAKE_COMMENT_ID` mechanism when a human responds.
+
+### Escalation v2
+
+The escalate extension at `extensions/escalate.ts` (v2) provides a unified `escalate` tool registered as a Pi extension. It replaces the v1 implementation (preserved at `extensions/escalate-v1.ts`, not loaded).
+
+The v2 extension selects its backend based on the `PAPERCLIP_DISCORD_PLUGIN_ID` environment variable:
+
+| PAPERCLIP_DISCORD_PLUGIN_ID | Backend | Behavior |
+|-----------------------------|---------|----------|
+| unset | local | Creates an issue with "escalation" label, then calls `request_confirmation` (or `ask_user_questions` if structured inputs provided) via the Paperclip interactions API. Sets `continuationPolicy=wake_assignee` so the agent resumes when the human responds. |
+| set (plugin UUID) | discord | Calls `POST /api/plugins/tools/execute` with tool `{pluginId}:escalate_to_human`, delegating the full escalation flow to the Discord plugin. |
+
+Both backends use the shared `skills/client.ts` API client for authentication. The tool interface is identical regardless of backend -- agents call `escalate` with the same parameters and get consistent behavior.
+
+| Variable | Purpose |
+|----------|---------|
+| PAPERCLIP_DISCORD_PLUGIN_ID | Plugin UUID; presence selects Discord backend |
+| PAPERCLIP_API_URL | Base URL for API calls |
+| PAPERCLIP_ADMIN_EMAIL | Auth email |
+| PAPERCLIP_ADMIN_PASS | Auth password |
+| PAPERCLIP_AGENT_ID | Calling agent's UUID |
+| PAPERCLIP_COMPANY_ID | Company UUID |
 
 ## Heartbeat and Health Checks
 

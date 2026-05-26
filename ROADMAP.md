@@ -402,6 +402,101 @@ Production upgrade from Aspire Dashboard. Purpose-built for agentic workflows: p
 
 ---
 
+## Planned: Data integration (ELT for agents)
+
+Data agent needs to pull from structured APIs (Crunchbase, HubSpot, etc.) without us building a custom extension per provider. This section lays out the progression from eval-stage lightweight to production-ready.
+
+### Design principle
+
+The agent shouldn't know provider-specific APIs. It should say "sync Crunchbase companies" and get structured data back. The integration layer handles auth, pagination, rate limits, schema mapping, and incremental sync.
+
+### Stage 1: DLT scripts (eval — no infrastructure)
+
+[DLT (data load tool)](https://dlthub.com/) is a Python library, not a platform. `pip install dlt`, write a script, run it. No server, no workers, no database. Output lands in DuckDB, Parquet, or JSON files.
+
+```
+Data agent calls: python3 /app/pipelines/crunchbase.py --query "series A San Francisco"
+DLT script: authenticates, paginates, normalizes schema, writes to /artifacts/data/crunchbase/
+Other agents: read structured files from /artifacts/data/
+```
+
+Why DLT for eval:
+- Zero infrastructure — just Python scripts in the data container
+- Runs inside existing Docker setup, no new containers
+- DuckDB as destination gives SQL queryability with zero server overhead
+- Built-in schema inference, incremental loading, and retry
+- Connector = a Python function. Crunchbase connector is ~50 lines wrapping their REST API.
+- Pipeline-as-code — version controlled, testable, agent-triggerable via CLI
+
+What it looks like in the container:
+```
+/app/pipelines/
+  crunchbase.py      # DLT source + pipeline, loads to /artifacts/data/crunchbase.duckdb
+  github_stars.py    # DLT source for GitHub, loads to /artifacts/data/github.duckdb
+  ...
+/artifacts/data/     # DuckDB files, Parquet, or JSON — queryable by other agents
+```
+
+Extension: thin `data-pipelines.ts` that wraps `execFileSync("python3", ["/app/pipelines/...", args])`. Lists available pipelines, triggers runs, returns output paths.
+
+### Stage 2: Airbyte (growth — when connector count justifies the weight)
+
+When the number of sources exceeds what's comfortable to maintain as DLT scripts (~10+), switch to Airbyte OSS. 600+ prebuilt connectors, managed via API. Data agent triggers syncs via `airbyte.ts` extension.
+
+Airbyte adds infrastructure: ~4GB RAM, Postgres for state, worker containers. Worth it when you're pulling from many sources regularly, not worth it for 2-3 pipelines at eval.
+
+```
+Data agent → Airbyte API (trigger syncs, check status, list connections)
+Airbyte → Source connectors → Destination (DuckDB, Postgres, or /artifacts)
+Other agents → query destination via org-data-query or SQL tools
+```
+
+#### Airbyte Connector Builder (CDK)
+
+Airbyte has a framework for building custom source connectors without writing Python:
+
+- **Low-code Builder** (UI-based): define API endpoints, authentication, pagination, and schema in YAML via Airbyte's web UI. Handles OAuth, API keys, cursor-based and offset pagination, response filtering, error handling. No code — just configuration. Good for straightforward REST APIs like Crunchbase.
+- **Python CDK**: for sources that need custom logic (websockets, GraphQL, non-standard auth). Scaffold with `airbyte-cdk`, implement `streams()` method, deploy as Docker image.
+- **Connector Marketplace**: publish custom connectors for reuse or contribute back to community catalog.
+
+A Crunchbase connector via the low-code Builder would be: define base URL, API key auth header, streams for `/organizations`, `/funding_rounds`, `/people`, `/acquisitions`, pagination config, and field mappings. Airbyte handles the rest.
+
+#### Connector status for known needs
+
+| Source | Airbyte connector | DLT source | Notes |
+|--------|-------------------|------------|-------|
+| Crunchbase | None — build via CDK | Write ~50 line script | User has subscription |
+| GitHub | Official | `dlt.sources.github` | Built-in DLT source |
+| Google Sheets | Official | `dlt.sources.google_sheets` | Built-in |
+| HubSpot | Official | `dlt.sources.hubspot` | Built-in |
+| Notion | Official | Community | Built-in Airbyte, community DLT |
+| Slack | Official | Community | Built-in Airbyte |
+| PostgreSQL | Official | `dlt.sources.sql_database` | Built-in both |
+
+### Stage 3: Orchestration (production — if pipelines need scheduling/monitoring)
+
+If pipelines need scheduling beyond "agent triggers when needed", add a lightweight orchestrator. Options from lightest to heaviest:
+
+| Tool | Weight | How it works | When to use |
+|------|--------|--------------|-------------|
+| Cron + DLT | Zero | Cron in container, DLT scripts | Scheduled pulls, no dependency graph |
+| Dagster | Light (~1GB) | Python-native, asset-based | Complex dependencies between pipelines |
+| Prefect | Medium (~2GB) | Python-native, flow-based | Need retries, notifications, observability |
+| Airflow | Heavy (~4GB+) | DAG-based, kitchen sink | Enterprise, many teams, complex scheduling |
+
+For this project, orchestration probably stays at cron or agent-triggered for a long time. The agents themselves are the orchestration layer — CEO assigns data tasks, Data agent runs pipelines. Adding Prefect/Dagster only makes sense if pipelines run independently of agent tasks.
+
+### Recommendation for now
+
+Start with Stage 1 (DLT scripts). Build a Crunchbase pipeline as the first one. If it works well, add more sources as DLT scripts. Revisit Airbyte when maintaining individual scripts becomes painful. Skip dedicated orchestration until there's a clear need for scheduled pipelines running outside of agent control.
+
+### Blocked on
+
+- Deciding which data sources agents actually need during eval runs
+- DLT + DuckDB added to data container (pip install dlt[duckdb], small footprint)
+
+---
+
 ## Future considerations
 
 - Artifact metadata index (what was produced, by whom, when)

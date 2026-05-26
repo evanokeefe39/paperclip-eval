@@ -7,7 +7,7 @@ PAPERCLIP_URL="${PAPERCLIP_URL:-http://localhost:3100}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin@eval.local}"
 ADMIN_PASS="${ADMIN_PASS:-eval-admin-2026}"
 COMPANY_NAME="${COMPANY_NAME:-eval}"
-COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+COMPOSE_FILE="${COMPOSE_FILE:-../../docker-compose.yml}"
 SKIP_BUILD="${SKIP_BUILD:-}"
 
 COOKIE_JAR="$(mktemp)"

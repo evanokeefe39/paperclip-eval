@@ -16,7 +16,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RESULTS_DIR="$REPO_ROOT/tests/results"
-COMPOSE_DIR="$REPO_ROOT/src/agents"
+COMPOSE_DIR="$REPO_ROOT"
 SITES_FILE="$SCRIPT_DIR/sites.json"
 
 source "$REPO_ROOT/tests/e2e/helpers.sh"

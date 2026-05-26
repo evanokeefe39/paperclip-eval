@@ -7,10 +7,11 @@ Evaluation repo for running Paperclip agent orchestration with Pi agents via Doc
 ## Repo layout
 
 ```
+docker-compose.yml          Full stack: Paperclip + agent containers (healthcheck on Paperclip)
+artifacts/                  Shared agent artifact storage (bind-mounted into containers at /artifacts)
 src/agents/
   bridge.mjs               HTTP-to-RPC bridge shim (Node, zero deps)
   Dockerfile               Shared image — node:22-slim + Pi CLI
-  docker-compose.yml        Full stack: Paperclip + agent containers (healthcheck on Paperclip)
   setup.sh                  Canonical setup script (bash) — idempotent, env-configurable
   setup.ps1                 Thin WSL wrapper for setup.sh
   bootstrap-invite.cjs      DB-level bootstrap invite creator (idempotent, bypasses CLI)

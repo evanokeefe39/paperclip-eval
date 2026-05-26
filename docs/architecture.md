@@ -21,9 +21,12 @@
  |  |  Server     |    http://ceo:8080       | bridge  |   |
  |  |             |                          +---------+   |
  |  |  :3100      |    HTTP POST /invoke     +----------+  |
- |  |             | -----------------------> |Researcher|  |
- |  |             |  http://researcher:8080  |  bridge  |  |
- |  +-------------+                          +----------+  |
+ |  |  (includes  | -----------------------> |Researcher|  |
+ |  |   Discord   |  http://researcher:8080  |  bridge  |  |
+ |  |   plugin)   |                          +----------+  |
+ |  |             |                                        |
+ |  |             |--- Discord API -----> Discord Server   |
+ |  +-------------+                                        |
  |                                                         |
  +=========================================================+
 ```
@@ -43,8 +46,18 @@
 - Role: HTTP-to-RPC translation layer between Paperclip and Pi
 - Stateless per-request: each invocation spawns a fresh Pi process
 - Each container runs `bridge.mjs` as its entrypoint
-- Pi extensions loaded at spawn: web-search, web-fetch, escalate, web-scrape, paperclip-tools, artifacts, logging
+- Pi extensions loaded at spawn: web-search, web-fetch, escalate (v2, local/discord backend), web-scrape, paperclip-tools, artifacts, logging
 - pi-otel installed for automatic OTel tracing (pi.interaction → pi.turn → pi.llm_request / pi.tool.* spans)
+
+### Discord Plugin (paperclip-plugin-discord v0.7.3)
+
+- Runs inside the Paperclip container, not in agent containers
+- Installed as a Paperclip plugin; managed via the plugin admin API
+- Registers 6 server-side tools in an in-memory PluginToolRegistry: `escalate_to_human`, `discord_signals`, `handoff_to_agent`, `discuss_with_agent`, `register_custom_command`, `register_watch`
+- These tools are not injected into HTTP adapter agents. They are callable only through the plugin tool REST API (see Plugin Tool API below).
+- Subscribes to Paperclip events (`issue.created`, `approval.created`, `agent.error`) and posts Discord embeds to a configured channel
+- Runs 5 scheduled jobs: intelligence scan, escalation timeout, watch check, budget threshold, daily digest
+- Configuration stored via `POST /api/plugins/{id}/config` with Discord bot token (stored as a Paperclip secret), channel ID, and guild ID
 
 ### Pi CLI
 
@@ -124,7 +137,16 @@ Pi extensions are TypeScript files loaded via `-e` flags at spawn time. They reg
 
 The Paperclip skills exist because the HTTP adapter does not inject MCP tools automatically. Local adapters (claude_local, pi_local) get these tools via a built-in MCP server subprocess. HTTP adapter agents must call the REST API directly, which is what the skills extension does.
 
-Extensions can import from relative paths (e.g., `paperclip-tools.ts` imports from `./client.js`). Pi resolves these at load time.
+Extensions can import from relative paths (e.g., `paperclip-tools.ts` imports from `./client.js`). Pi resolves these at load time. Cross-directory imports also work (e.g., `escalate.ts` imports from `../skills/client.js`).
+
+### Escalate Extension (v2)
+
+The `escalate.ts` extension registers a single `escalate` tool that presents a uniform interface to agents regardless of the notification backend. Backend selection is automatic based on environment:
+
+- Discord mode: when `PAPERCLIP_DISCORD_PLUGIN_ID` is set, the tool calls `POST /api/plugins/tools/execute` with `{pluginId}:escalate_to_human`. The plugin posts an interactive Discord embed with buttons. Human responses flow back through Discord threads into Paperclip issue comments.
+- Local mode: when the env var is absent, the tool creates a Paperclip issue with an `escalation` label and attaches either a `request_confirmation` or `ask_user_questions` interaction (depending on whether the agent supplied structured inputs). The agent is paused and waits for human response in the Paperclip UI.
+
+Both paths use the shared `skills/client.ts` for session-cookie auth. The old v1 implementation is preserved as `escalate-v1.ts`.
 
 ### Deep Research Module
 
@@ -135,3 +157,70 @@ The `deep-research.ts` extension delegates to a 15-file submodule at `extensions
 - **Validated LLM output**: `llm.ts` `structuredCall` accepts a validator callback (from `validate.ts`) instead of bare `as T` casts, catching malformed LLM responses at the call site rather than propagating them.
 - **Shared utilities**: `utils.ts` exports `sleep` and `stripHtml`, eliminating duplicated inline implementations across sweep, engine, and llm modules.
 - **Config as named constants**: `config.ts` centralizes all magic numbers (content length thresholds, snippet caps, chunk sizes, concurrency limits) as exported constants with documenting names.
+
+## Plugin Tool API
+
+Paperclip plugins register tools in a server-side `PluginToolRegistry`. These tools are not injected into agent contexts (HTTP adapter agents do not receive them). Instead, agent-side code calls them through two REST endpoints:
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/plugins/tools` | GET | List all registered plugin tools (name, description, schema) |
+| `/api/plugins/tools/execute` | POST | Execute a plugin tool by qualified name |
+
+The execute endpoint expects:
+
+```json
+{
+  "tool": "{pluginId}:{toolName}",
+  "parameters": { ... },
+  "runContext": {
+    "agentId": "...",
+    "companyId": "..."
+  }
+}
+```
+
+The escalate extension (v2) uses this endpoint to invoke `escalate_to_human` when Discord mode is active. Other plugin tools (`discord_signals`, `handoff_to_agent`, `discuss_with_agent`, `register_custom_command`, `register_watch`) are available through the same mechanism but are not yet wrapped in agent-side extensions.
+
+### Escalation Data Flow (Discord Mode)
+
+```
+Agent Container                Paperclip Server               Discord
+   |                              |                              |
+   |--- escalate tool called ---->|                              |
+   |    POST /api/plugins/        |                              |
+   |    tools/execute             |                              |
+   |    {pluginId}:escalate_      |                              |
+   |    to_human                  |--- Discord embed ----------->|
+   |                              |    (buttons: approve/reject) |
+   |<-- escalationId ------------|                              |
+   |                              |                              |
+   |    (agent paused or          |<-- button click / reply -----|
+   |     waiting)                 |                              |
+   |                              |--- issue comment created --->|
+   |                              |--- agent wake (comment ID) ->|
+   |<-- resumed with response ----|                              |
+```
+
+### Escalation Data Flow (Local Mode)
+
+```
+Agent Container                Paperclip Server               Paperclip UI
+   |                              |                              |
+   |--- escalate tool called ---->|                              |
+   |    POST /companies/{id}/     |                              |
+   |    issues (create issue)     |                              |
+   |                              |                              |
+   |--- POST /issues/{id}/       |                              |
+   |    interactions              |                              |
+   |    (request_confirmation     |                              |
+   |     or ask_user_questions)   |                              |
+   |                              |                              |
+   |--- POST /agents/{id}/pause  |                              |
+   |                              |                              |
+   |<-- issue + interaction ------|--- displayed in UI --------->|
+   |    created                   |                              |
+   |                              |<-- human responds in UI -----|
+   |                              |--- agent wake -------------->|
+   |<-- resumed with response ----|                              |
+```

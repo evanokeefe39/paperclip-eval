@@ -431,7 +431,7 @@ echo ""
 echo "[Section 7] Container-to-Paperclip Auth (Docker network)"
 
 begin_test "Researcher container can reach Paperclip"
-CONTAINER_HEALTH=$(docker compose -f "$REPO_ROOT/src/agents/docker-compose.yml" \
+CONTAINER_HEALTH=$(docker compose -f "$REPO_ROOT/docker-compose.yml" \
     exec -T researcher node -e "
 fetch('http://paperclip:3100/api/health')
   .then(r => console.log(r.status))
@@ -442,7 +442,7 @@ if assert_eq "$CONTAINER_HEALTH" "200" "container health check"; then
 fi
 
 begin_test "Researcher container can authenticate with Paperclip"
-CONTAINER_AUTH=$(docker compose -f "$REPO_ROOT/src/agents/docker-compose.yml" \
+CONTAINER_AUTH=$(docker compose -f "$REPO_ROOT/docker-compose.yml" \
     exec -T researcher node -e "
 fetch('http://paperclip:3100/api/auth/sign-in/email', {
   method: 'POST',
@@ -455,7 +455,7 @@ if assert_eq "$CONTAINER_AUTH" "200" "container auth status"; then
 fi
 
 begin_test "Researcher container can create issue via Paperclip"
-CONTAINER_ISSUE=$(docker compose -f "$REPO_ROOT/src/agents/docker-compose.yml" \
+CONTAINER_ISSUE=$(docker compose -f "$REPO_ROOT/docker-compose.yml" \
     exec -T researcher node -e "
 async function test() {
   const auth = await fetch('http://paperclip:3100/api/auth/sign-in/email', {
@@ -478,7 +478,7 @@ if assert_eq "$CONTAINER_ISSUE" "201" "container issue creation"; then
 fi
 
 begin_test "Researcher container env vars set correctly"
-CONTAINER_ENV=$(docker compose -f "$REPO_ROOT/src/agents/docker-compose.yml" \
+CONTAINER_ENV=$(docker compose -f "$REPO_ROOT/docker-compose.yml" \
     exec -T researcher node -e "
 const vars = ['PAPERCLIP_API_URL','PAPERCLIP_ADMIN_EMAIL','PAPERCLIP_ADMIN_PASS','PAPERCLIP_AGENT_ID','PAPERCLIP_COMPANY_ID'];
 const missing = vars.filter(v => !process.env[v]);

@@ -130,14 +130,11 @@ This survives timeout, OOM, or any other mid-flight failure. Next invocation
 picks up where the last one died. CEO can re-invoke Writer on same issue and
 it resumes automatically.
 
-### Timeout Considerations
+### Timeout & Model (Validated)
 
-Default 120s may be tight for large documents. Options:
-- Increase BRIDGE_TIMEOUT_MS for Writer container (e.g. 300s)
-- Or: design pipeline so each step fits within 120s (PLAN is fast, each EXPAND
-  subagent is one section, STITCH and POLISH read completed files)
-- Checkpoint granularity means even if timeout hits mid-EXPAND, completed sections
-  are already on disk. Next invocation resumes from the gap.
+Writer container runs with BRIDGE_TIMEOUT_MS=300000 (5 min) and deepseek-chat as
+primary model. MiniMax-M2.7 cannot handle STITCH step (stream errors on large context).
+DeepSeek-chat handles the full pipeline reliably.
 
 ### Proposed Architecture
 
@@ -171,11 +168,19 @@ Step 2 — EXPAND (model role: default, concurrent via subagents)
     On completion, update manifest (sections_done += section)
   Checkpoint after each section — survives mid-expand timeout
 
-Step 3 — STITCH (model role: review)
-  Writer reads all section files
-  Checks coherence, removes redundancy, adds transitions
-  Writes draft to /artifacts/{context}/draft.md
+Step 3 — STITCH (mechanical + editorial)
+  3a. Concatenate: use bash to cat all section files in order into draft.md
+      This is mechanical — no LLM needed. Avoids reading 7 files in LLM context.
+  3b. Editorial pass: LLM reads draft.md (single file), adds:
+      - Transitions between sections
+      - Executive summary at top
+      - Consistent heading hierarchy
+      Writes edited version back to draft.md
   Updates manifest (stage: "polish")
+
+  LESSON: Asking LLM to read N files + compose unified output in one turn
+  exceeds practical turn budget. Splitting into concat (bash) + edit (LLM)
+  is more robust.
 
 Step 4 — POLISH (model role: default)
   Self-review for formatting integrity only:
@@ -183,7 +188,6 @@ Step 4 — POLISH (model role: default)
     - Malformed markdown
     - Inconsistent heading levels
     - Orphaned citations
-    - Missing section transitions
   No semantic fact-checking (Researcher already scored intel quality upstream)
   Writes final to /artifacts/{context}/final.md
   Updates manifest (stage: "complete", polish_done: true)

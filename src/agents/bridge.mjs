@@ -177,8 +177,7 @@ const server = http.createServer(async (req, res) => {
     "--model", PI_MODEL,
     "-e", "/app/extensions/web-search.ts",
     "-e", "/app/extensions/web-fetch.ts",
-    // "-e", "/app/extensions/escalate.ts", // disabled — using paperclip-plugin-discord escalate_to_human instead
-
+    "-e", "/app/extensions/escalate.ts",
     "-e", "/app/extensions/web-scrape.ts",
     "-e", "/app/skills/paperclip-tools.ts",
     "-e", "/app/extensions/artifacts.ts",
@@ -222,11 +221,18 @@ const server = http.createServer(async (req, res) => {
     stderrOutput += chunk.toString();
   });
 
+  // Buffer partial JSONL lines across chunks — a single event can exceed 64KB
+  // and arrive split across multiple TCP reads
+  let stdoutBuf = "";
   pi.stdout.on("data", (chunk) => {
-    const lines = chunk.toString().split("\n").filter(Boolean);
-    for (const line of lines) {
-      // --- 1.6 Protocol capture mode ---
-      log("debug", "pi_raw_event", { raw: line });
+    stdoutBuf += chunk.toString();
+    const parts = stdoutBuf.split("\n");
+    // Last element is either "" (line ended with \n) or an incomplete line
+    stdoutBuf = parts.pop() || "";
+
+    for (const line of parts) {
+      if (!line) continue;
+      log("debug", "pi_raw_event", { raw: line.length > 500 ? line.slice(0, 500) + "…" : line });
 
       try {
         const event = JSON.parse(line);
@@ -245,7 +251,7 @@ const server = http.createServer(async (req, res) => {
           });
         }
       } catch (err) {
-        log("warn", "pi_error", { error: "JSONL parse error", detail: err.message, raw: line });
+        log("warn", "pi_error", { error: "JSONL parse error", detail: err.message, raw: line.slice(0, 200) });
       }
     }
   });

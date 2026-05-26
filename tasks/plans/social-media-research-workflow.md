@@ -64,7 +64,15 @@ Outcome: Actionable content strategy brief.
 
 ## Prerequisites
 
-- [ ] Writer agent wired into docker-compose
-- [ ] Writer agent design finalized (model selection, context window strategy, document generation pattern)
+- [x] Writer agent wired into docker-compose (port 8084, deepseek-chat, 600s timeout)
+- [x] Writer agent design finalized (skeleton-of-thought pipeline, checkpoint resumability)
 - [ ] Paperclip project/goals/issues created
 - [ ] Test run: CEO delegates simple research task through full pipeline
+- [x] E2E test script: tests/e2e/e2e-10-social-research.sh
+
+## Technical Debt (do after e2e passes)
+
+- [ ] Refactor web-scrape.ts into web-scrape/ directory (1200+ lines, 7 tools — split like deep-research/)
+  - deps.ts, challenge.ts, parse.ts
+  - tools/: scrape-static, scrape-stealth, scrape-browser, scrape-apify, apify-dataset, apify-status, apify-actors
+- [ ] Bridge BRIDGE_TIMEOUT_MS should be per-agent in docker-compose (done: researcher/data/writer at 600s)

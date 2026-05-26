@@ -825,49 +825,39 @@ export default function (pi: ExtensionAPI) {
         }
 
         if (status === "SUCCEEDED") {
-          const itemsRes = await fetch(
-            `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_TOKEN}&limit=${maxResults}`,
+          // Count items without fetching full data — keeps tool response small
+          const countRes = await fetch(
+            `https://api.apify.com/v2/datasets/${datasetId}?token=${APIFY_API_TOKEN}`,
             { signal }
           );
-          if (!itemsRes.ok) {
-            return {
-              content: [
-                {
-                  type: "text" as const,
-                  text: `Actor run completed but failed to fetch results. Run ID: ${runId}, Dataset: ${datasetId}`,
-                },
-              ],
-              details: {
-                runId,
-                datasetId,
-                status: "SUCCEEDED",
-                tier: "apify",
-              },
+          let itemCount = 0;
+          if (countRes.ok) {
+            const countData = (await countRes.json()) as {
+              data: { itemCount?: number };
             };
-          }
-
-          const items = (await itemsRes.json()) as Record<string, unknown>[];
-          const lines: string[] = [];
-          lines.push("## Apify Actor Results\n");
-          lines.push(`**Actor:** ${params.actor_id}`);
-          lines.push(`**Run ID:** ${runId}`);
-          lines.push(`**Items returned:** ${items.length}\n`);
-
-          if (items.length > 0) {
-            lines.push("### Data\n");
-            lines.push("```json");
-            lines.push(JSON.stringify(items, null, 2));
-            lines.push("```");
+            itemCount = countData.data.itemCount ?? 0;
           }
 
           return {
-            content: [{ type: "text" as const, text: lines.join("\n") }],
+            content: [
+              {
+                type: "text" as const,
+                text: [
+                  "## Apify Actor Completed\n",
+                  `**Actor:** ${params.actor_id}`,
+                  `**Run ID:** ${runId}`,
+                  `**Dataset ID:** ${datasetId}`,
+                  `**Items available:** ${itemCount}\n`,
+                  "Use `apify_save_dataset` to stream results to a local file, then read the file.",
+                ].join("\n"),
+              },
+            ],
             details: {
               actorId: params.actor_id,
               runId,
               datasetId,
               status: "SUCCEEDED",
-              itemCount: items.length,
+              itemCount,
               tier: "apify",
             },
           };
@@ -1042,6 +1032,128 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // ---- apify_save_dataset: stream dataset to local file ----
+
+  pi.registerTool({
+    name: "apify_save_dataset",
+    label: "Save Apify Dataset",
+    description:
+      "Stream an Apify dataset to a local JSON file. Use this after scrape_apify or scrape_status returns a dataset ID. The data is written directly to disk — it never enters your context window. Then read the file with normal file tools.",
+    promptSnippet:
+      "Save an Apify dataset to a local file. Use after scrape_apify returns a datasetId.",
+    parameters: Type.Object({
+      dataset_id: Type.String({
+        description: "Apify dataset ID (returned by scrape_apify or scrape_status)",
+      }),
+      output_path: Type.String({
+        description: "Local file path to write JSON results (e.g. /artifacts/run-1/instagram.json)",
+      }),
+      max_results: Type.Optional(
+        Type.Number({
+          description: "Max items to save (default 100)",
+        })
+      ),
+      format: Type.Optional(
+        Type.Union(
+          [Type.Literal("json"), Type.Literal("jsonl")],
+          { description: "Output format: json (array, default) or jsonl (one JSON object per line)" }
+        )
+      ),
+    }),
+    async execute(_toolCallId, params) {
+      try {
+        if (!APIFY_API_TOKEN) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "APIFY_API_TOKEN is not set.",
+              },
+            ],
+            details: { error: "missing_token", tier: "apify" },
+          };
+        }
+
+        const limit = params.max_results ?? 100;
+        const fmt = params.format ?? "json";
+        const { writeFileSync, mkdirSync } = require("node:fs");
+        const { dirname } = require("node:path");
+
+        mkdirSync(dirname(params.output_path), { recursive: true });
+
+        const res = await fetch(
+          `https://api.apify.com/v2/datasets/${params.dataset_id}/items?token=${APIFY_API_TOKEN}&limit=${limit}`,
+        );
+
+        if (!res.ok) {
+          const errText = await res.text().catch(() => "");
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Failed to fetch dataset (${res.status}): ${errText}`,
+              },
+            ],
+            details: {
+              datasetId: params.dataset_id,
+              error: `HTTP ${res.status}`,
+              tier: "apify",
+            },
+          };
+        }
+
+        const items = (await res.json()) as Record<string, unknown>[];
+
+        let content: string;
+        if (fmt === "jsonl") {
+          content = items.map((item) => JSON.stringify(item)).join("\n") + "\n";
+        } else {
+          content = JSON.stringify(items, null, 2);
+        }
+
+        writeFileSync(params.output_path, content, "utf-8");
+
+        const bytes = Buffer.byteLength(content, "utf-8");
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: [
+                `Dataset saved to ${params.output_path}`,
+                `Items: ${items.length}, Size: ${bytes} bytes, Format: ${fmt}`,
+                `Read the file to inspect the data.`,
+              ].join("\n"),
+            },
+          ],
+          details: {
+            datasetId: params.dataset_id,
+            outputPath: params.output_path,
+            itemCount: items.length,
+            bytes,
+            format: fmt,
+            tier: "apify",
+          },
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Failed to save dataset: ${msg}`,
+            },
+          ],
+          details: {
+            datasetId: params.dataset_id,
+            error: msg,
+            tier: "apify",
+          },
+        };
+      }
+    },
+  });
+
   // ---- scrape_status: check Apify run status ----
 
   pi.registerTool({
@@ -1108,40 +1220,34 @@ export default function (pi: ExtensionAPI) {
         if (run.finishedAt) lines.push(`**Finished:** ${run.finishedAt}`);
 
         if (run.status === "SUCCEEDED" && run.defaultDatasetId) {
-          const itemsRes = await fetch(
-            `https://api.apify.com/v2/datasets/${run.defaultDatasetId}/items?token=${APIFY_API_TOKEN}&limit=100`,
+          const countRes = await fetch(
+            `https://api.apify.com/v2/datasets/${run.defaultDatasetId}?token=${APIFY_API_TOKEN}`,
             { signal }
           );
-
-          if (itemsRes.ok) {
-            const items = (await itemsRes.json()) as Record<
-              string,
-              unknown
-            >[];
-            lines.push(`**Items returned:** ${items.length}\n`);
-
-            if (items.length > 0) {
-              lines.push("### Data\n");
-              lines.push("```json");
-              lines.push(JSON.stringify(items, null, 2));
-              lines.push("```");
-            }
-
-            return {
-              content: [{ type: "text" as const, text: lines.join("\n") }],
-              details: {
-                jobId: params.job_id,
-                status: run.status,
-                datasetId: run.defaultDatasetId,
-                itemCount: items.length,
-                tier: "apify",
-              },
+          let itemCount = 0;
+          if (countRes.ok) {
+            const countData = (await countRes.json()) as {
+              data: { itemCount?: number };
             };
-          } else {
-            lines.push(
-              "\nRun completed but failed to fetch dataset items."
-            );
+            itemCount = countData.data.itemCount ?? 0;
           }
+
+          lines.push(`**Dataset ID:** ${run.defaultDatasetId}`);
+          lines.push(`**Items available:** ${itemCount}\n`);
+          lines.push(
+            "Use `apify_save_dataset` to stream results to a local file, then read the file."
+          );
+
+          return {
+            content: [{ type: "text" as const, text: lines.join("\n") }],
+            details: {
+              jobId: params.job_id,
+              status: run.status,
+              datasetId: run.defaultDatasetId,
+              itemCount,
+              tier: "apify",
+            },
+          };
         }
 
         if (

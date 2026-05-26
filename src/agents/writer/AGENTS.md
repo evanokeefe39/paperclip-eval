@@ -24,9 +24,13 @@ Read `/artifacts/{context}/manifest.json`. If it exists, skip to the appropriate
 - Sections can be expanded concurrently via subagents
 
 ### Step 3 — STITCH
-- Read all completed section files
-- Check coherence, remove redundancy, add transitions between sections
-- Write unified draft to `/artifacts/{context}/draft.md`
+- First, concatenate all section files in order using bash: `cat /artifacts/{context}/sections/*.md > /artifacts/{context}/draft.md`
+- Then read draft.md (single file) and do an editorial pass:
+  - Add transitions between sections where they feel abrupt
+  - Add executive summary at the top (2-3 sentences)
+  - Ensure consistent heading hierarchy across sections
+  - Write the edited version back to draft.md
+- Do NOT try to read all section files individually then rewrite — use bash concatenation first
 - Update manifest
 
 ### Step 4 — POLISH
