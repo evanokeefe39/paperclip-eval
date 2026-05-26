@@ -133,7 +133,23 @@ Structured JSON to stdout, one entry per line. Fields:
 }
 ```
 
-Event types: `server_start`, `request_received`, `pi_spawn`, `pi_prompt_sent`, `pi_ready`, `pi_raw_event` (debug), `pi_response`, `pi_error`, `request_complete`.
+Event types: `server_start`, `request_received`, `pi_spawn`, `pi_prompt_sent`, `pi_ready`, `pi_raw_event` (debug), `pi_response`, `pi_error`, `request_complete`, `cost_reported`, `cost_report_failed`.
+
+## Trace Propagation
+
+Each /invoke request generates a W3C TRACEPARENT (`00-{trace_id}-{span_id}-01`) passed to Pi via environment variable. pi-otel inside Pi picks this up as the parent trace context, linking bridge requests to agent spans in the Aspire Dashboard.
+
+Response JSON includes `trace_id` for external correlation with Paperclip issues or artifact metadata.
+
+## Cost Reporting
+
+Bridge extracts token usage from Pi's `turn_end` JSONL events (fields: `usage.input`, `usage.output`, `usage.cacheRead`, `provider`, `model`). Aggregates across all turns per request.
+
+After Pi completes, POSTs to Paperclip's cost-events API: `POST /api/companies/{companyId}/cost-events` with `agentId`, `provider`, `model`, `inputTokens`, `outputTokens`, `cachedInputTokens`. Session-cookie auth (same pattern as escalate extension).
+
+Fire-and-forget — cost reporting failure does not affect the /invoke response. Skips POST when total tokens is zero (e.g. MiniMax which returns all-zero usage).
+
+Response JSON includes `usage` summary object.
 
 ## Concurrency Model
 

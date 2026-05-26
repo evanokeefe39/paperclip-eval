@@ -18,7 +18,7 @@ COPY ${AGENT_NAME}/AGENTS.md /app/AGENTS.md
 COPY templates/ /app/templates/
 ENV AGENT_NAME=${AGENT_NAME}
 
-RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents || true
+RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents npm:pi-otel || true
 
 RUN mkdir -p /workspace
 

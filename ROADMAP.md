@@ -323,29 +323,34 @@ Pi extension install (`npm:shitty-extensions npm:@ifi/pi-extension-subagents`) i
 
 ---
 
-## Planned: Escalation notification adapters (Discord first)
+## In Progress: Discord integration via paperclip-plugin-discord
 
-Close the notification gap in the escalation system. Agents escalate via Paperclip issues today, but humans only see them if they're watching the Paperclip UI. Notification adapters deliver escalations to where humans already are.
+Use the community `paperclip-plugin-discord` plugin (mvanhorn, v0.7.3) for bidirectional Discord integration. Replaces the planned custom adapter approach.
 
 ### Why
 
-- Agents sit idle until a human notices the Paperclip issue
-- The escalate spec was designed for this: the tool creates the issue, and downstream notification is handled by Paperclip's plugin system or external adapters
-- Paperclip's community notification plugins are not available in eval — we build adapters ourselves
-- Discord is the first adapter; the same pattern supports Telegram, Slack, or a local TUI later
+- Paperclip has a full plugin system (69 capabilities, event subscriptions, webhooks, outbound HTTP)
+- Community plugin already provides everything we need: `escalate_to_human`, interactive approvals, reply routing, slash commands, daily digests
+- Shared `PlatformAdapter` abstraction (`paperclip-plugin-chat-core`) means Telegram and Slack plugins follow the same pattern
+- Building custom adapters was reinventing what the platform already supports
 
-### Architecture
+### Status
 
-The escalate tool (Pi extension) creates a Paperclip issue and pauses the agent. That's where its responsibility ends. Notification delivery is a separate concern handled by adapter services. Paperclip is the bus — the issue system is the shared interface between the escalate tool and all notification adapters. Human responses flow back as Paperclip issue comments. Paperclip wakes the agent via `PAPERCLIP_WAKE_REASON` / `PAPERCLIP_WAKE_COMMENT_ID` env vars on the next heartbeat.
+- Plugin installed in Paperclip instance (status: `ready`)
+- Placeholder config set — needs real Discord bot token, channel ID, guild ID
+- Custom `escalate.ts` disabled in bridge.mjs (retained for potential future fork/extension)
 
-### Blocked on
+### Remaining
 
-- Discord server setup (operator task)
-- Validating escalation patterns with current two-agent setup first
+- Create Discord server and bot application (operator task)
+- Create Paperclip secrets for bot token and board API key
+- Configure plugin with real values
+- Verify escalation loop end-to-end
+- Evaluate whether Telegram/Slack plugins should be added alongside
 
 ### Spec
 
-`tasks/specs/discord-bridge.md`
+`tasks/specs/discord-plugin-setup.md`
 
 ---
 
@@ -383,53 +388,17 @@ The standard defines a tiered test methodology per component type — what must 
 
 ---
 
-## Planned: Cost tracking pipeline
+## In Progress: Cost tracking pipeline
 
-Bridge.mjs already captures Pi's full JSONL event stream including token usage from `message_end` events, but does not extract or aggregate it. Paperclip has a cost dashboard but the HTTP adapter doesn't feed it.
+Part of the logging extension work. Spec: `tasks/specs/ext-logging.md` (Phase 4). Plan: `tasks/plans/logging-otel.md`.
 
-### Phase 1 — Extract token usage in bridge
-
-Parse `message_end` events from Pi stdout for `usage` fields (prompt_tokens, completion_tokens, model). Aggregate per request. Include in /metrics endpoint and response JSON.
-
-### Phase 2 — Feed Paperclip cost dashboard
-
-When Paperclip exposes a cost/usage API endpoint, POST aggregated token counts per invocation. Map to agent ID, model, timestamp. Use `paperclip_api_request` escape hatch if no dedicated endpoint exists.
-
-### Phase 3 — OTel cost correlation
-
-pi-otel `pi.llm_request` spans already carry token counts and model info. If Langfuse is adopted (see below), cost tracking comes free via its model pricing database. Otherwise, extract from Aspire spans via a lightweight aggregation job.
-
-### Blocked on
-
-- Verifying Pi's JSONL event schema for token usage fields (quick spike)
-- Paperclip cost API availability (check upstream)
+Pi emits token usage on `turn_end` events. Paperclip accepts cost data via `POST /api/companies/{cid}/cost-events`. Bridge aggregates and reports. DeepSeek returns real counts; MiniMax returns zeros (provider limitation). Spikes verified both sides — see `spikes/RESULTS.md`.
 
 ---
 
 ## Planned: Langfuse (LLM-native observability)
 
-Replace or augment Aspire Dashboard with Langfuse for LLM-specific analytics: per-model cost tracking, eval scores, prompt versioning, session threading, token usage dashboards.
-
-### Why
-
-Aspire shows raw OTel spans — good for debugging, bad for LLM analytics. Langfuse is purpose-built for agentic workflows and provides cost-per-run, evaluation pipelines, and prompt iteration history that a generic span viewer cannot.
-
-### What it looks like
-
-- 7-service compose stack: Langfuse web + worker, ClickHouse, Postgres, Redis, MinIO, OTel Collector
-- OTel Collector bridges pi-otel gRPC → Langfuse OTLP/HTTP endpoint
-- ~2-4GB RAM total
-- UI at :3000
-
-### When
-
-After eval stage validates the basic OTel pipeline (Aspire). Langfuse is the production upgrade path — same pi-otel export, different sink. No changes to logging.ts or bridge.mjs.
-
-### Blocked on
-
-- Completing OTel logging extension with Aspire (current work)
-- Enough eval runs to justify the infrastructure weight
-- MinIO deployment (Langfuse self-hosted uses MinIO anyway — shared dependency)
+Production upgrade from Aspire Dashboard. Purpose-built for agentic workflows: per-model cost tracking, eval scores, prompt versioning, session threading. Same pi-otel export, different sink — no code changes needed. 7-service compose stack (~2-4GB RAM). Blocked on: completing OTel logging extension, enough eval runs to justify weight, MinIO (shared dependency).
 
 ---
 

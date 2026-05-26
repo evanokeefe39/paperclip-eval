@@ -43,7 +43,8 @@
 - Role: HTTP-to-RPC translation layer between Paperclip and Pi
 - Stateless per-request: each invocation spawns a fresh Pi process
 - Each container runs `bridge.mjs` as its entrypoint
-- Pi extensions loaded at spawn: web-search, web-fetch, escalate, paperclip-tools
+- Pi extensions loaded at spawn: web-search, web-fetch, escalate, web-scrape, paperclip-tools, artifacts, logging
+- pi-otel installed for automatic OTel tracing (pi.interaction → pi.turn → pi.llm_request / pi.tool.* spans)
 
 ### Pi CLI
 

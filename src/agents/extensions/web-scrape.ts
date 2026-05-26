@@ -43,16 +43,136 @@ function hasScraplingFetcher(): boolean {
 }
 
 function hasScraplingBrowser(): boolean {
-  // Marker file created by data/Dockerfile after `scrapling install`
-  // Import-based detection won't work: DynamicFetcher import succeeds
-  // even without browser binaries (scrapling[fetchers] installs the pip
-  // package but not the browsers)
   try {
     require("node:fs").accessSync("/app/.browsers-installed");
     return true;
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Challenge page detection — sits between fetch and parse
+// ---------------------------------------------------------------------------
+
+interface ChallengeResult {
+  isChallenge: boolean;
+  vendor?: "cloudflare" | "datadome" | "perimeterx" | "aws_waf" | "unknown";
+  signature?: string;
+}
+
+function detectChallenge(html: string): ChallengeResult {
+  const lower = html.toLowerCase();
+
+  if (
+    lower.includes("<title>just a moment...</title>") ||
+    lower.includes("cf-browser-verification") ||
+    lower.includes("cf-challenge-running") ||
+    lower.includes("cloudflare") && lower.includes("ray id")
+  ) {
+    return {
+      isChallenge: true,
+      vendor: "cloudflare",
+      signature: "Cloudflare browser verification / challenge page",
+    };
+  }
+
+  if (
+    lower.includes("<title>datadome</title>") ||
+    lower.includes("dd.js") ||
+    lower.includes("window._ddc") ||
+    lower.includes("geo.captcha-delivery.com")
+  ) {
+    return {
+      isChallenge: true,
+      vendor: "datadome",
+      signature: "DataDome captcha / challenge",
+    };
+  }
+
+  if (
+    lower.includes("_px") && lower.includes("captcha") ||
+    lower.includes("captcha.px-cdn.net") ||
+    lower.includes("perimeterx")
+  ) {
+    return {
+      isChallenge: true,
+      vendor: "perimeterx",
+      signature: "PerimeterX bot detection",
+    };
+  }
+
+  if (
+    lower.includes("aws-waf-token") ||
+    lower.includes("awswaf") ||
+    (lower.includes("captcha") && lower.includes("aws"))
+  ) {
+    return {
+      isChallenge: true,
+      vendor: "aws_waf",
+      signature: "AWS WAF challenge",
+    };
+  }
+
+  // Generic captcha / challenge heuristic
+  const challengeSignals = [
+    "verify you are human",
+    "checking your browser",
+    "please complete the security check",
+    "access denied",
+    "enable javascript and cookies",
+  ];
+  for (const sig of challengeSignals) {
+    if (lower.includes(sig)) {
+      return {
+        isChallenge: true,
+        vendor: "unknown",
+        signature: sig,
+      };
+    }
+  }
+
+  return { isChallenge: false };
+}
+
+// ---------------------------------------------------------------------------
+// Shared cheerio parse layer — one parser for all local tiers
+// ---------------------------------------------------------------------------
+
+interface ParseResult {
+  items: (Record<string, string> | string)[];
+  matchCount: number;
+}
+
+function extractWithCheerio(
+  html: string,
+  selector: string,
+  extractFields?: Record<string, string>,
+  maxItems?: number
+): ParseResult {
+  const cheerio = require("cheerio");
+  const $ = cheerio.load(html);
+  const max = maxItems ?? 100;
+  const items: (Record<string, string> | string)[] = [];
+  const elements = $(selector);
+  const matchCount = elements.length;
+
+  elements.each((_i: number, el: unknown) => {
+    if (items.length >= max) return false;
+
+    if (extractFields && Object.keys(extractFields).length > 0) {
+      const record: Record<string, string> = {};
+      for (const [field, fieldSelector] of Object.entries(extractFields)) {
+        record[field] = $(el).find(fieldSelector).text().trim();
+      }
+      items.push(record);
+    } else {
+      const text = $(el).text().trim();
+      if (text) items.push(text);
+    }
+  });
+
+  return { items, matchCount };
 }
 
 // ---------------------------------------------------------------------------
@@ -82,17 +202,14 @@ function formatScrapeResult(
   if (data.items.length > 0) {
     lines.push("### Items\n");
 
-    // Determine if items are objects with fields or plain strings
     const first = data.items[0];
     if (typeof first === "object" && first !== null) {
       const keys = Object.keys(first);
-      // Render as markdown table
       lines.push("| " + keys.join(" | ") + " |");
       lines.push("| " + keys.map(() => "---").join(" | ") + " |");
       for (const item of data.items as Record<string, string>[]) {
         const values = keys.map((k) => {
           const v = item[k] ?? "";
-          // Escape pipes in cell values
           return String(v).replace(/\|/g, "\\|").replace(/\n/g, " ");
         });
         lines.push("| " + values.join(" | ") + " |");
@@ -110,6 +227,46 @@ function formatScrapeResult(
       lines.push(`- ${err}`);
     }
   }
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic output — when extraction yields zero items
+// ---------------------------------------------------------------------------
+
+function buildDiagnostics(
+  html: string,
+  selector: string,
+  challenge: ChallengeResult,
+  matchCount: number,
+  statusCode: number
+): string {
+  const lines: string[] = [];
+  lines.push("\n### Diagnostics (zero items extracted)\n");
+  lines.push(`**HTTP status:** ${statusCode}`);
+  lines.push(`**HTML length:** ${html.length} chars`);
+
+  if (challenge.isChallenge) {
+    lines.push(`**Challenge detected:** ${challenge.vendor} — ${challenge.signature}`);
+    lines.push("**Suggestion:** Try a higher tier or use T4 (Apify).");
+  } else {
+    lines.push("**Challenge detected:** none");
+  }
+
+  lines.push(`**Selector match count:** ${matchCount} elements matched \`${selector}\``);
+
+  // Page title
+  const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const title = titleMatch ? titleMatch[1].trim().slice(0, 200) : "(no title)";
+  lines.push(`**Page title:** ${title}`);
+
+  // Meta description
+  const descMatch = html.match(
+    /<meta[^>]+name=["']description["'][^>]+content=["']([^"']*)/i
+  );
+  const desc = descMatch ? descMatch[1].trim().slice(0, 300) : "(none)";
+  lines.push(`**Meta description:** ${desc}`);
 
   return lines.join("\n");
 }
@@ -137,17 +294,50 @@ const ExtractFieldsSchema = Type.Optional(
 );
 
 // ---------------------------------------------------------------------------
+// Python fetch-only helper — calls Python script, returns raw HTML + metadata
+// ---------------------------------------------------------------------------
+
+interface FetchResult {
+  html: string;
+  status_code: number;
+  url: string;
+  duration_ms: number;
+  errors: string[];
+}
+
+function pythonFetch(
+  scriptPath: string,
+  url: string,
+  timeoutMs: number,
+  waitFor?: string
+): FetchResult {
+  const input: Record<string, unknown> = { url };
+  if (waitFor) input.wait_for = waitFor;
+
+  const result = execFileSync(
+    "python3",
+    [scriptPath, JSON.stringify(input)],
+    {
+      encoding: "utf-8",
+      timeout: timeoutMs,
+      maxBuffer: 10 * 1024 * 1024,
+    }
+  );
+
+  return JSON.parse(result) as FetchResult;
+}
+
+// ---------------------------------------------------------------------------
 // Extension entry point
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
-  // Cache dependency checks so we only probe once
   const cheerioAvailable = hasCheerio();
   const scraplingFetcherAvailable = hasScraplingFetcher();
   const scraplingBrowserAvailable = hasScraplingBrowser();
 
   // =========================================================================
-  // Tier 1: scrape_static — cheerio-based
+  // Tier 1: scrape_static — Node fetch + cheerio parse
   // =========================================================================
 
   if (cheerioAvailable) {
@@ -173,17 +363,20 @@ export default function (pi: ExtensionAPI) {
       }),
       async execute(_toolCallId, params, signal) {
         try {
-          const cheerio = require("cheerio");
           const maxItems = params.max_items ?? 100;
           const maxPages = params.pagination?.max_pages ?? 1;
           const startTime = Date.now();
-          const items: (Record<string, string> | string)[] = [];
+          const allItems: (Record<string, string> | string)[] = [];
           const errors: string[] = [];
           let pagesCrawled = 0;
           let currentUrl = params.url;
+          let lastHtml = "";
+          let lastChallenge: ChallengeResult = { isChallenge: false };
+          let lastMatchCount = 0;
+          let lastStatusCode = 0;
 
           for (let page = 0; page < maxPages; page++) {
-            if (items.length >= maxItems) break;
+            if (allItems.length >= maxItems) break;
 
             let html: string;
             try {
@@ -196,6 +389,7 @@ export default function (pi: ExtensionAPI) {
                 },
                 signal,
               });
+              lastStatusCode = res.status;
               if (!res.ok) {
                 errors.push(`HTTP ${res.status} on ${currentUrl}`);
                 break;
@@ -208,31 +402,30 @@ export default function (pi: ExtensionAPI) {
               break;
             }
 
-            const $ = cheerio.load(html);
+            lastHtml = html;
             pagesCrawled++;
 
-            $(params.selector).each((_i: number, el: unknown) => {
-              if (items.length >= maxItems) return false;
+            lastChallenge = detectChallenge(html);
+            if (lastChallenge.isChallenge) {
+              errors.push(
+                `Challenge page detected (${lastChallenge.vendor}): ${lastChallenge.signature}. Try a higher tier.`
+              );
+              break;
+            }
 
-              if (
-                params.extract_fields &&
-                Object.keys(params.extract_fields).length > 0
-              ) {
-                const record: Record<string, string> = {};
-                for (const [field, fieldSelector] of Object.entries(
-                  params.extract_fields
-                )) {
-                  record[field] = $(el).find(fieldSelector).text().trim();
-                }
-                items.push(record);
-              } else {
-                const text = $(el).text().trim();
-                if (text) items.push(text);
-              }
-            });
+            const { items, matchCount } = extractWithCheerio(
+              html,
+              params.selector,
+              params.extract_fields,
+              maxItems - allItems.length
+            );
+            lastMatchCount = matchCount;
+            allItems.push(...items);
 
             // Handle pagination
             if (params.pagination?.next_selector && page < maxPages - 1) {
+              const cheerio = require("cheerio");
+              const $ = cheerio.load(html);
               const nextHref = $(params.pagination.next_selector).attr("href");
               if (!nextHref) break;
               try {
@@ -242,28 +435,40 @@ export default function (pi: ExtensionAPI) {
                 break;
               }
             } else if (page < maxPages - 1 && params.pagination) {
-              // No next link found, stop
               break;
             }
           }
 
           const durationMs = Date.now() - startTime;
           const data: ScrapeData = {
-            items: items as ScrapeData["items"],
+            items: allItems as ScrapeData["items"],
             pages_crawled: pagesCrawled,
             duration_ms: durationMs,
             errors,
           };
 
-          const text = formatScrapeResult(data, params.url, "static (cheerio)");
+          let text = formatScrapeResult(data, params.url, "static (cheerio)");
+          if (allItems.length === 0 && lastHtml) {
+            text += buildDiagnostics(
+              lastHtml,
+              params.selector,
+              lastChallenge,
+              lastMatchCount,
+              lastStatusCode
+            );
+          }
+
           return {
             content: [{ type: "text" as const, text }],
             details: {
               url: params.url,
-              itemCount: items.length,
+              itemCount: allItems.length,
               pagesCrawled,
               durationMs,
               tier: "static",
+              challenge: lastChallenge.isChallenge
+                ? lastChallenge.vendor
+                : null,
             },
           };
         } catch (err) {
@@ -283,15 +488,15 @@ export default function (pi: ExtensionAPI) {
   }
 
   // =========================================================================
-  // Tier 2: scrape_stealth — Python scrapling Fetcher
+  // Tier 2: scrape_stealth — Python fetch + cheerio parse
   // =========================================================================
 
-  if (scraplingFetcherAvailable) {
+  if (scraplingFetcherAvailable && cheerioAvailable) {
     pi.registerTool({
       name: "scrape_stealth",
       label: "Stealth Scraper",
       description:
-        "Scrape structured data using an anti-detection HTTP client. Better for sites that block standard requests. Uses Python scrapling Fetcher with realistic TLS fingerprints and header rotation.",
+        "Scrape structured data using an anti-detection HTTP client. Better for sites that block standard requests. Uses Python scrapling Fetcher with realistic TLS fingerprints and header rotation. Parsing done with cheerio (same as T1).",
       promptSnippet:
         "Scrape sites that block standard requests using stealth HTTP client.",
       parameters: Type.Object({
@@ -309,39 +514,63 @@ export default function (pi: ExtensionAPI) {
       }),
       async execute(_toolCallId, params, _signal) {
         try {
-          const input = {
-            url: params.url,
-            selector: params.selector,
-            extract_fields: params.extract_fields ?? null,
-            pagination: params.pagination ?? null,
-            max_items: params.max_items ?? 100,
-          };
-
-          const result = execFileSync(
-            "python3",
-            ["/app/scripts/scrape_stealth.py", JSON.stringify(input)],
-            {
-              encoding: "utf-8",
-              timeout: 60_000,
-              maxBuffer: 5 * 1024 * 1024,
-            }
+          const startTime = Date.now();
+          const fetchResult = pythonFetch(
+            "/app/scripts/scrape_stealth.py",
+            params.url,
+            60_000
           );
 
-          const parsed: ScrapeData = JSON.parse(result);
-          const text = formatScrapeResult(
-            parsed,
+          const errors = [...fetchResult.errors];
+
+          const challenge = detectChallenge(fetchResult.html);
+          if (challenge.isChallenge) {
+            errors.push(
+              `Challenge page detected (${challenge.vendor}): ${challenge.signature}. Try T3 or T4.`
+            );
+          }
+
+          const { items, matchCount } = challenge.isChallenge
+            ? { items: [], matchCount: 0 }
+            : extractWithCheerio(
+                fetchResult.html,
+                params.selector,
+                params.extract_fields,
+                params.max_items
+              );
+
+          const durationMs = Date.now() - startTime;
+          const data: ScrapeData = {
+            items: items as ScrapeData["items"],
+            pages_crawled: fetchResult.html ? 1 : 0,
+            duration_ms: durationMs,
+            errors,
+          };
+
+          let text = formatScrapeResult(
+            data,
             params.url,
             "stealth (scrapling Fetcher)"
           );
+          if (items.length === 0 && fetchResult.html) {
+            text += buildDiagnostics(
+              fetchResult.html,
+              params.selector,
+              challenge,
+              matchCount,
+              fetchResult.status_code
+            );
+          }
 
           return {
             content: [{ type: "text" as const, text }],
             details: {
               url: params.url,
-              itemCount: parsed.items.length,
-              pagesCrawled: parsed.pages_crawled,
-              durationMs: parsed.duration_ms,
+              itemCount: items.length,
+              pagesCrawled: fetchResult.html ? 1 : 0,
+              durationMs,
               tier: "stealth",
+              challenge: challenge.isChallenge ? challenge.vendor : null,
             },
           };
         } catch (err) {
@@ -361,15 +590,15 @@ export default function (pi: ExtensionAPI) {
   }
 
   // =========================================================================
-  // Tier 3: scrape_browser — Python scrapling PlayWrightFetcher
+  // Tier 3: scrape_browser — Python browser fetch + cheerio parse
   // =========================================================================
 
-  if (scraplingBrowserAvailable) {
+  if (scraplingBrowserAvailable && cheerioAvailable) {
     pi.registerTool({
       name: "scrape_browser",
       label: "Browser Scraper",
       description:
-        "Scrape structured data using a headless browser for JavaScript-rendered pages. Uses Python scrapling DynamicFetcher with anti-detection measures. Slower but handles SPAs, dynamic content, and pages requiring JS execution.",
+        "Scrape structured data using a headless browser for JavaScript-rendered pages. Uses Python scrapling DynamicFetcher with anti-detection measures. Parsing done with cheerio (same as T1/T2). Slower but handles SPAs, dynamic content, and pages requiring JS execution.",
       promptSnippet:
         "Scrape JS-rendered pages using headless browser with anti-detection.",
       parameters: Type.Object({
@@ -393,40 +622,64 @@ export default function (pi: ExtensionAPI) {
       }),
       async execute(_toolCallId, params, _signal) {
         try {
-          const input = {
-            url: params.url,
-            selector: params.selector,
-            extract_fields: params.extract_fields ?? null,
-            pagination: params.pagination ?? null,
-            max_items: params.max_items ?? 100,
-            wait_for: params.wait_for ?? null,
-          };
-
-          const result = execFileSync(
-            "python3",
-            ["/app/scripts/scrape_browser.py", JSON.stringify(input)],
-            {
-              encoding: "utf-8",
-              timeout: 120_000,
-              maxBuffer: 5 * 1024 * 1024,
-            }
+          const startTime = Date.now();
+          const fetchResult = pythonFetch(
+            "/app/scripts/scrape_browser.py",
+            params.url,
+            120_000,
+            params.wait_for ?? undefined
           );
 
-          const parsed: ScrapeData = JSON.parse(result);
-          const text = formatScrapeResult(
-            parsed,
+          const errors = [...fetchResult.errors];
+
+          const challenge = detectChallenge(fetchResult.html);
+          if (challenge.isChallenge) {
+            errors.push(
+              `Challenge page detected (${challenge.vendor}): ${challenge.signature}. Try T4 (Apify).`
+            );
+          }
+
+          const { items, matchCount } = challenge.isChallenge
+            ? { items: [], matchCount: 0 }
+            : extractWithCheerio(
+                fetchResult.html,
+                params.selector,
+                params.extract_fields,
+                params.max_items
+              );
+
+          const durationMs = Date.now() - startTime;
+          const data: ScrapeData = {
+            items: items as ScrapeData["items"],
+            pages_crawled: fetchResult.html ? 1 : 0,
+            duration_ms: durationMs,
+            errors,
+          };
+
+          let text = formatScrapeResult(
+            data,
             params.url,
             "browser (scrapling DynamicFetcher)"
           );
+          if (items.length === 0 && fetchResult.html) {
+            text += buildDiagnostics(
+              fetchResult.html,
+              params.selector,
+              challenge,
+              matchCount,
+              fetchResult.status_code
+            );
+          }
 
           return {
             content: [{ type: "text" as const, text }],
             details: {
               url: params.url,
-              itemCount: parsed.items.length,
-              pagesCrawled: parsed.pages_crawled,
-              durationMs: parsed.duration_ms,
+              itemCount: items.length,
+              pagesCrawled: fetchResult.html ? 1 : 0,
+              durationMs,
               tier: "browser",
+              challenge: challenge.isChallenge ? challenge.vendor : null,
             },
           };
         } catch (err) {
@@ -498,7 +751,6 @@ export default function (pi: ExtensionAPI) {
           ...(params.actor_input ?? {}),
         };
 
-        // Merge url into startUrls if provided
         if (params.url) {
           if (!input.startUrls || !Array.isArray(input.startUrls)) {
             input.startUrls = [];
@@ -506,7 +758,6 @@ export default function (pi: ExtensionAPI) {
           (input.startUrls as { url: string }[]).push({ url: params.url });
         }
 
-        // Start the actor run
         const runRes = await fetch(
           `https://api.apify.com/v2/acts/${encodeURIComponent(params.actor_id)}/runs?token=${APIFY_API_TOKEN}`,
           {
@@ -544,7 +795,6 @@ export default function (pi: ExtensionAPI) {
         const runId = runData.data.id;
         const datasetId = runData.data.defaultDatasetId;
 
-        // Poll for completion (up to 30s)
         const pollStart = Date.now();
         const POLL_TIMEOUT_MS = 30_000;
         const POLL_INTERVAL_MS = 2_000;
@@ -575,7 +825,6 @@ export default function (pi: ExtensionAPI) {
         }
 
         if (status === "SUCCEEDED") {
-          // Fetch dataset items
           const itemsRes = await fetch(
             `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_TOKEN}&limit=${maxResults}`,
             { signal }
@@ -641,7 +890,6 @@ export default function (pi: ExtensionAPI) {
           };
         }
 
-        // Still running after poll timeout — return run ID for later checking
         const lines: string[] = [];
         lines.push("## Apify Actor Started\n");
         lines.push(`**Actor:** ${params.actor_id}`);

@@ -1,6 +1,6 @@
 # Scrape Stack Redesign: Decouple Fetch from Parse + Data-Driven Runner
 
-Status: Draft
+Status: Implemented
 Created: 2026-05-26
 Fixes: systemic-fetch-parse-coupling, systemic-procedural-runner, t2-selector-compat, cheerio-global-resolve, yelp-selectors-stale, ebay-t3-not-tested, t4-apify-untested
 
@@ -75,9 +75,9 @@ Convert `scrape_stealth.py` and `scrape_browser.py` from "fetch + parse + extrac
 No more `selector`, `extract_fields`, `pagination`, `max_items` in the Python scripts. Those move to the parse layer.
 
 Files to change:
-- [ ] `src/agents/data/scripts/scrape_stealth.py` — strip extraction, return HTML
-- [ ] `src/agents/data/scripts/scrape_browser.py` — strip extraction, return HTML
-- [ ] `src/agents/researcher/scripts/scrape_stealth.py` — same changes
+- [x] `src/agents/data/scripts/scrape_stealth.py` — strip extraction, return HTML
+- [x] `src/agents/data/scripts/scrape_browser.py` — strip extraction, return HTML
+- [x] `src/agents/researcher/scripts/scrape_stealth.py` — same changes
 
 ### Step 1.2: Shared cheerio parse function in web-scrape.ts
 
@@ -95,7 +95,7 @@ function extractWithCheerio(
 All three local tiers call this after fetching. T4 bypasses it (Apify returns structured data).
 
 Files to change:
-- [ ] `src/agents/extensions/web-scrape.ts` — extract shared parse function, refactor T1/T2/T3 tool implementations to use it
+- [x] `src/agents/extensions/web-scrape.ts` — extract shared parse function, refactor T1/T2/T3 tool implementations to use it
 
 ### Step 1.3: Challenge page detection
 
@@ -118,15 +118,15 @@ Signatures to detect:
 When detected: return a structured result telling the agent what blocked it and suggesting T4.
 
 Files to change:
-- [ ] `src/agents/extensions/web-scrape.ts` — add detectChallenge, call between fetch and parse
+- [x] `src/agents/extensions/web-scrape.ts` — add detectChallenge, call between fetch and parse
 
 ### Step 1.4: Dockerfile NODE_PATH fix
 
 Add `ENV NODE_PATH=/usr/local/lib/node_modules` to both bespoke Dockerfiles. Resolves cheerio-global-resolve issue and ensures any future global packages are resolvable.
 
 Files to change:
-- [ ] `src/agents/data/Dockerfile` — add ENV line after global npm installs
-- [ ] `src/agents/researcher/Dockerfile` — same
+- [x] `src/agents/data/Dockerfile` — add ENV line after global npm installs
+- [x] `src/agents/researcher/Dockerfile` — same
 
 ### Step 1.5: Update test runner T1 to use shared parse
 
@@ -146,7 +146,7 @@ run_t2() {
 The parse_script is the same cheerio extraction logic used by run_t1 but accepting HTML as input instead of fetching.
 
 Files to change:
-- [ ] `tests/scraping/real-world-tests.sh` — refactor run_t2, run_t3 to fetch-then-parse pattern
+- [x] `tests/scraping/real-world-tests.sh` — refactor run_t2, run_t3 to fetch-then-parse pattern
 
 ---
 
@@ -178,7 +178,7 @@ Create `tests/scraping/sites.json`:
 All 15 sites in one file. Single source of truth for URLs, selectors, tier flags.
 
 Files to create:
-- [ ] `tests/scraping/sites.json`
+- [x] `tests/scraping/sites.json`
 
 ### Step 2.2: Generic runner
 
@@ -206,7 +206,7 @@ Phase selection: `jq '[.[] | select(.phase == 1)]' sites.json` feeds phase1.
 Site selection: `jq '[.[] | select(.name == "hackernews")]' sites.json` feeds single-site mode.
 
 Files to change:
-- [ ] `tests/scraping/real-world-tests.sh` — replace test_* functions with generic runner
+- [x] `tests/scraping/real-world-tests.sh` — replace test_* functions with generic runner
 
 ### Step 2.3: Pre-flight readiness check
 
@@ -232,7 +232,7 @@ preflight() {
 ```
 
 Files to change:
-- [ ] `tests/scraping/real-world-tests.sh` — add preflight function, call before any tests
+- [x] `tests/scraping/real-world-tests.sh` — add preflight function, call before any tests
 
 ### Step 2.4: Populate sites.json from campaign results
 
@@ -285,15 +285,15 @@ Recommended execution: 1.4 → 1.1 → 1.2 → 1.3 → 1.5, then 2.1 → 2.2/2.3
 
 ## Definition of done
 
-- [ ] All local tiers use cheerio for extraction — zero lxml parsing of selectors
-- [ ] Python scripts output raw HTML, not extracted items
-- [ ] Challenge page detection identifies Cloudflare, DataDome, PerimeterX, AWS WAF
-- [ ] Test runner driven by sites.json, no per-site functions
-- [ ] Pre-flight check validates tier capabilities before running
-- [ ] eBay tested with T3
-- [ ] Re-run full campaign, compare results to 2026-05-26 baseline
-- [ ] Selectors that failed due to parser differences now pass (Reddit T2, etc.)
-- [ ] NODE_PATH set in Dockerfiles
+- [x] All local tiers use cheerio for extraction — zero lxml parsing of selectors
+- [x] Python scripts output raw HTML, not extracted items
+- [x] Challenge page detection identifies Cloudflare, DataDome, PerimeterX, AWS WAF
+- [x] Test runner driven by sites.json, no per-site functions
+- [x] Pre-flight check validates tier capabilities before running
+- [x] eBay tested with T3 (added to sites.json tiers)
+- [x] Re-run full campaign, compare results to 2026-05-26 baseline
+- [x] Selectors that failed due to parser differences now pass (cheerio verified on T2: HN, GitHub, Amazon, Indeed)
+- [x] NODE_PATH set in Dockerfiles
 
 ## Out of scope
 

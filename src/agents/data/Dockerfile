@@ -27,6 +27,8 @@ RUN pip3 install --break-system-packages "scrapling[fetchers]"
 RUN scrapling install
 RUN npm install -g cheerio
 
+ENV NODE_PATH=/usr/local/lib/node_modules
+
 WORKDIR /app
 
 COPY bridge.mjs .
@@ -39,7 +41,7 @@ COPY data/.pi/agent/auth.json /root/.pi/agent/auth.json
 COPY data/AGENTS.md /app/AGENTS.md
 COPY data/scripts/ /app/scripts/
 
-RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents || true
+RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents npm:pi-otel || true
 
 RUN touch /app/.browsers-installed
 RUN mkdir -p /workspace

@@ -1,3 +1,28 @@
+# STALE — Partially superseded by paperclip-plugin-discord
+
+> **2026-05-26:** The core escalation path (create Paperclip issue, pause agent, human responds,
+> agent resumes) is now handled by `paperclip-plugin-discord` which provides `escalate_to_human`
+> with richer features: conversation context, confidence scoring, suggested replies, interactive
+> Discord buttons, configurable timeout, and the shared `PlatformAdapter` abstraction from
+> `paperclip-plugin-chat-core`.
+>
+> Key incorrect assumptions in this spec:
+> - Line 4: "Existing Paperclip plugins (Discord, Telegram, Slack) notify the human" — these
+>   are community plugins, not built into the Paperclip image. They must be installed separately.
+> - Line 14: implied `PAPERCLIP_API_KEY` env var — Paperclip uses session-cookie auth, not API keys.
+>   The actual implementation in escalate.ts uses cookie auth.
+> - `.pending-escalation` state file — unnecessary; Paperclip provides `PAPERCLIP_WAKE_REASON`
+>   and `PAPERCLIP_WAKE_COMMENT_ID` env vars on agent resume.
+>
+> `src/agents/extensions/escalate.ts` is retained but disabled in bridge.mjs. It may be extended
+> or used as reference if we fork/extend the Discord plugin in the future.
+>
+> Replacement spec: `tasks/specs/discord-plugin-setup.md`
+
+---
+
+# (Original spec below — retained for reference)
+
 # pi-escalate
 
 Minimal Pi extension that lets an agent escalate to a human via Paperclip issues.

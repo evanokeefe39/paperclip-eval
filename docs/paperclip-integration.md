@@ -130,6 +130,13 @@ Paperclip runs in `authenticated` mode with `private` exposure:
 | /api/approvals/{id}/comments                                | POST   | Add approval comment           |
 | /api/execution-workspaces/{id}/runtime-services/{action}    | POST   | Control workspace services     |
 
+### Used by bridge.mjs (cost reporting)
+
+| Endpoint                                                    | Method | Purpose                        |
+|-------------------------------------------------------------|--------|--------------------------------|
+| /api/auth/sign-in/email                                     | POST   | Auth for cost reporting        |
+| /api/companies/{cid}/cost-events                            | POST   | Report token usage per run     |
+
 ## Paperclip Skills (Platform Tools for HTTP Adapter Agents)
 
 Local adapters (claude_local, pi_local) automatically receive Paperclip's MCP tools via a built-in MCP server subprocess. The HTTP adapter does not — it simply POSTs a JSON payload to the agent URL with no tool injection.

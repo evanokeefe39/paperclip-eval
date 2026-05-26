@@ -8,7 +8,12 @@ const PORT = process.env.BRIDGE_PORT || 8080;
 const PI_PROVIDER = process.env.PI_PROVIDER || "minimax";
 const PI_MODEL = process.env.PI_MODEL || "MiniMax-M2.7";
 const BRIDGE_TIMEOUT_MS = parseInt(process.env.BRIDGE_TIMEOUT_MS, 10) || 120000;
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
+const PAPERCLIP_API_URL = process.env.PAPERCLIP_API_URL || "";
+const PAPERCLIP_ADMIN_EMAIL = process.env.PAPERCLIP_ADMIN_EMAIL || "";
+const PAPERCLIP_ADMIN_PASS = process.env.PAPERCLIP_ADMIN_PASS || "";
+const PAPERCLIP_AGENT_ID = process.env.PAPERCLIP_AGENT_ID || "";
+const PAPERCLIP_COMPANY_ID = process.env.PAPERCLIP_COMPANY_ID || "";
 
 // --- 1.1 Hand-rolled JSON logger ---
 
@@ -19,6 +24,54 @@ function log(level, event, data = {}) {
   if (LEVELS[level] < LEVELS[LOG_LEVEL]) return;
   const entry = { ts: new Date().toISOString(), level, event, pid: process.pid, ...data };
   process.stdout.write(JSON.stringify(entry) + "\n");
+}
+
+// --- Cost reporting to Paperclip ---
+
+let costSession = null;
+
+async function ensureCostSession() {
+  if (costSession && Date.now() - costSession.ts < 20 * 60 * 1000) return costSession;
+  if (!PAPERCLIP_API_URL || !PAPERCLIP_ADMIN_EMAIL || !PAPERCLIP_ADMIN_PASS) return null;
+  try {
+    const res = await fetch(`${PAPERCLIP_API_URL}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Origin": PAPERCLIP_API_URL },
+      body: JSON.stringify({ email: PAPERCLIP_ADMIN_EMAIL, password: PAPERCLIP_ADMIN_PASS }),
+    });
+    if (!res.ok) return null;
+    const cookie = res.headers.getSetCookie?.()?.join("; ") || "";
+    costSession = { cookie, ts: Date.now() };
+    return costSession;
+  } catch { return null; }
+}
+
+async function reportCostEvent(usage) {
+  if (!PAPERCLIP_COMPANY_ID || !PAPERCLIP_AGENT_ID) return;
+  if ((usage.inputTokens + usage.outputTokens) === 0) return;
+  const session = await ensureCostSession();
+  if (!session) return;
+  try {
+    await fetch(`${PAPERCLIP_API_URL}/api/companies/${PAPERCLIP_COMPANY_ID}/cost-events`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Origin": PAPERCLIP_API_URL,
+        "Cookie": session.cookie,
+      },
+      body: JSON.stringify({
+        agentId: PAPERCLIP_AGENT_ID,
+        provider: usage.provider,
+        model: usage.model,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cachedInputTokens: usage.cachedInputTokens,
+      }),
+    });
+    log("debug", "cost_reported", { input: usage.inputTokens, output: usage.outputTokens });
+  } catch (err) {
+    log("warn", "cost_report_failed", { error: err.message });
+  }
 }
 
 // --- 1.3 In-memory metrics counters ---
@@ -73,6 +126,9 @@ const server = http.createServer(async (req, res) => {
   }
 
   const requestStart = Date.now();
+  const traceId = randomUUID().replace(/-/g, "");
+  const spanId = randomUUID().replace(/-/g, "").slice(0, 16);
+  const traceparent = `00-${traceId}-${spanId}-01`;
   metrics.requests_total++;
   metrics.requests_active++;
   metrics.last_request_at = new Date().toISOString();
@@ -80,6 +136,7 @@ const server = http.createServer(async (req, res) => {
   log("info", "request_received", {
     method: req.method,
     url: req.url,
+    trace_id: traceId,
   });
 
   // --- 1.4 Body parsing with error handling ---
@@ -120,10 +177,12 @@ const server = http.createServer(async (req, res) => {
     "--model", PI_MODEL,
     "-e", "/app/extensions/web-search.ts",
     "-e", "/app/extensions/web-fetch.ts",
-    "-e", "/app/extensions/escalate.ts",
+    // "-e", "/app/extensions/escalate.ts", // disabled — using paperclip-plugin-discord escalate_to_human instead
+
     "-e", "/app/extensions/web-scrape.ts",
     "-e", "/app/skills/paperclip-tools.ts",
     "-e", "/app/extensions/artifacts.ts",
+    "-e", "/app/extensions/logging.ts",
     ...(systemPrompt ? ["--append-system-prompt", systemPrompt] : []),
   ];
 
@@ -134,7 +193,7 @@ const server = http.createServer(async (req, res) => {
   try {
     pi = spawn("pi", spawnArgs, {
       cwd: body.workspace || "/workspace",
-      env: { ...process.env, ...body.env },
+      env: { ...process.env, ...body.env, TRACEPARENT: traceparent },
     });
   } catch (err) {
     metrics.requests_active--;
@@ -155,6 +214,7 @@ const server = http.createServer(async (req, res) => {
   log("info", "pi_prompt_sent", { prompt_length: prompt.length });
 
   const events = [];
+  const usageByTurn = [];
   let output = "";
   let stderrOutput = "";
 
@@ -174,6 +234,15 @@ const server = http.createServer(async (req, res) => {
         if (event.type === "message_update") {
           const delta = event.assistantMessageEvent;
           if (delta?.type === "text_delta") output += delta.delta;
+        }
+        if (event.type === "turn_end" && event.message?.usage) {
+          usageByTurn.push({
+            provider: event.message.provider || PI_PROVIDER,
+            model: event.message.model || PI_MODEL,
+            input: event.message.usage.input || 0,
+            output: event.message.usage.output || 0,
+            cacheRead: event.message.usage.cacheRead || 0,
+          });
         }
       } catch (err) {
         log("warn", "pi_error", { error: "JSONL parse error", detail: err.message, raw: line });
@@ -265,24 +334,39 @@ const server = http.createServer(async (req, res) => {
   metrics.durations.push(totalDuration);
   metrics.requests_active--;
 
+  const usage = {
+    inputTokens: usageByTurn.reduce((s, u) => s + u.input, 0),
+    outputTokens: usageByTurn.reduce((s, u) => s + u.output, 0),
+    cachedInputTokens: usageByTurn.reduce((s, u) => s + u.cacheRead, 0),
+    provider: usageByTurn[0]?.provider || PI_PROVIDER,
+    model: usageByTurn[0]?.model || PI_MODEL,
+    turns: usageByTurn.length,
+  };
+
   log("info", "pi_response", {
     output_length: output.length,
     event_count: events.length,
     duration_ms: totalDuration,
+    trace_id: traceId,
+    usage,
   });
 
   if (stderrOutput) {
     log("warn", "pi_error", { error: "stderr output", stderr: stderrOutput });
   }
 
+  reportCostEvent(usage).catch(() => {});
+
   const statusCode = 200;
-  log("info", "request_complete", { status: statusCode, duration_ms: totalDuration });
+  log("info", "request_complete", { status: statusCode, duration_ms: totalDuration, trace_id: traceId });
 
   res.writeHead(statusCode, { "Content-Type": "application/json" });
   res.end(JSON.stringify({
     output,
     events,
     exitCode: pi.exitCode,
+    trace_id: traceId,
+    usage,
   }));
 });
 

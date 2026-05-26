@@ -2,7 +2,7 @@
 
 ## Status
 
-Spec draft v2. Extension stub at src/agents/extensions/logging.ts (empty).
+Implemented. Extension at src/agents/extensions/logging.ts with submodules at logging/ (buffer.ts, jsonl.ts, otel.ts, types.ts). Bridge cost reporting and trace propagation in bridge.mjs. Aspire Dashboard in docker-compose.yml. 23 unit tests passing.
 
 ## Intent
 
@@ -198,18 +198,39 @@ WHEN pi-otel attempts to export
 THEN export fails silently (pi-otel handles this internally)
 AND JSONL logging in logging.ts continues unaffected
 
+### BC-10: Cost reporting to Paperclip
+GIVEN Pi emits turn_end events with usage fields (input, output, cacheRead, provider, model)
+WHEN bridge.mjs receives turn_end events during a request
+THEN it extracts and aggregates token counts across all turns
+AND after the Pi process completes, POSTs to Paperclip's cost-events API:
+  `POST /api/companies/{companyId}/cost-events` with agentId, provider, model, inputTokens, outputTokens, cachedInputTokens
+
+### BC-11: Cost reporting graceful degradation
+GIVEN Paperclip is unreachable or cost-events API returns an error
+WHEN bridge.mjs attempts to POST cost data
+THEN the error is logged but does not affect the /invoke response
+AND token usage is still included in the response JSON for external consumers
+
+### BC-12: Zero-usage providers
+GIVEN some providers (e.g. MiniMax) return all-zero token counts
+WHEN bridge.mjs aggregates usage from turn_end events
+THEN it skips the cost-events POST if totalTokens is 0 (nothing to report)
+
 ## Edge Case Inventory
 
 1. **No dashboard running**: pi-otel export fails silently. JSONL logging unaffected. Tools still work.
 2. **pi-otel not installed**: logging.ts works standalone — JSONL + in-memory buffer. No automatic tool/LLM spans.
 3. **No TRACE_ID env var**: logging.ts generates its own UUID. pi-otel creates its own trace context.
-4. **pi-otel in RPC mode**: Must verify pi-otel works with `--mode rpc`. If not, fall back to logging.ts-only mode. (See Open Question 1.)
+4. ~~**pi-otel in RPC mode**~~: Verified — works. (Spike passed.)
 5. **Rapid log_event calls**: In-memory buffer capped at 1000 entries (ring buffer). JSONL unbounded append-only.
 6. **Pi process killed mid-run**: Batched spans may be lost (pi-otel). JSONL has partial data. Acceptable for eval.
 7. **Large metadata objects**: Truncate metadata values over 4KB in JSONL entries.
 8. **/artifacts volume not mounted**: JSONL write fails silently. In-memory buffer still works.
 9. **Multiple concurrent requests**: Each gets unique trace_id. Independent trace trees.
 10. **pi-otel content capture and sensitive data**: Use `metadata_only` capture mode (default). Avoids logging full prompt/response content which may contain API keys or PII passed in env.
+11. **MiniMax zero token counts**: MiniMax API returns all-zero usage through OpenAI-compat interface. Cost reporting skipped for zero-usage runs. Not a bug — provider limitation.
+12. **Multi-turn tool calls**: Each turn_end has its own usage. Bridge aggregates across all turns (sum input, output, cacheRead). Reports once after agent_end.
+13. **Paperclip cost-events auth**: Uses same session-cookie auth as escalate extension. Bridge signs in once per startup, reuses session.
 
 ## Implementation
 
@@ -282,6 +303,73 @@ env: { ...process.env, ...body.env, TRACEPARENT: traceparent },
 res.end(JSON.stringify({ output, events, exitCode, trace_id: traceId }));
 ```
 
+### Phase 4: Cost reporting in bridge (Paperclip dashboard integration)
+
+Bridge.mjs extracts token usage from Pi's `turn_end` events and reports to Paperclip's cost-events API. No new deps — uses native `fetch` and existing Paperclip auth env vars.
+
+**Token extraction** — in the existing event parsing loop:
+```javascript
+// Track usage per turn
+const usageByTurn = [];
+
+// In the pi.stdout handler, after JSON.parse:
+if (event.type === "turn_end" && event.message?.usage) {
+  usageByTurn.push({
+    provider: event.message.provider,
+    model: event.message.model,
+    input: event.message.usage.input || 0,
+    output: event.message.usage.output || 0,
+    cacheRead: event.message.usage.cacheRead || 0,
+  });
+}
+```
+
+**Cost reporting** — after Pi process completes, before sending HTTP response:
+```javascript
+// Aggregate usage across turns
+const totalInput = usageByTurn.reduce((s, u) => s + u.input, 0);
+const totalOutput = usageByTurn.reduce((s, u) => s + u.output, 0);
+const totalCacheRead = usageByTurn.reduce((s, u) => s + u.cacheRead, 0);
+const provider = usageByTurn[0]?.provider;
+const model = usageByTurn[0]?.model;
+
+if (totalInput + totalOutput > 0) {
+  reportCostEvent({
+    agentId: process.env.PAPERCLIP_AGENT_ID,
+    companyId: process.env.PAPERCLIP_COMPANY_ID,
+    provider,
+    model,
+    inputTokens: totalInput,
+    outputTokens: totalOutput,
+    cachedInputTokens: totalCacheRead,
+  }).catch(err => log("warn", "cost_report_failed", { error: err.message }));
+}
+```
+
+**reportCostEvent** — thin wrapper using session-cookie auth (same pattern as `src/agents/skills/client.ts`):
+```javascript
+async function reportCostEvent(data) {
+  const session = await signIn(); // reuse cached session
+  await fetch(`${PAPERCLIP_API_URL}/api/companies/${data.companyId}/cost-events`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Origin": PAPERCLIP_API_URL,
+      "Cookie": session.cookie,
+    },
+    body: JSON.stringify(data),
+  });
+}
+```
+
+**Response JSON** — include usage summary:
+```javascript
+res.end(JSON.stringify({
+  output, events, exitCode, trace_id: traceId,
+  usage: { input: totalInput, output: totalOutput, cacheRead: totalCacheRead, provider, model },
+}));
+```
+
 ### Env vars
 
 | Var | Default | Purpose |
@@ -291,6 +379,11 @@ res.end(JSON.stringify({ output, events, exitCode, trace_id: traceId }));
 | OTEL_SERVICE_NAME | {AGENT_NAME}-agent | Service name in traces |
 | LOG_BUFFER_SIZE | 1000 | In-memory ring buffer capacity |
 | LOG_JSONL_ENABLED | true | Write JSONL files |
+| PAPERCLIP_API_URL | http://paperclip:3100 | Paperclip base URL (cost reporting) |
+| PAPERCLIP_ADMIN_EMAIL | — | Auth for cost-events API |
+| PAPERCLIP_ADMIN_PASS | — | Auth for cost-events API |
+| PAPERCLIP_AGENT_ID | — | Agent ID for cost attribution |
+| PAPERCLIP_COMPANY_ID | — | Company ID for cost-events endpoint |
 
 ## Definition of Done
 
@@ -308,6 +401,12 @@ res.end(JSON.stringify({ output, events, exitCode, trace_id: traceId }));
 - [ ] Graceful degradation: works without dashboard, works without pi-otel
 - [ ] Unit tests for buffer, jsonl modules
 - [ ] Integration test: invoke agent, verify trace appears in dashboard
+- [ ] Bridge extracts token usage from turn_end events
+- [ ] Bridge POSTs to Paperclip cost-events API after each invocation
+- [ ] Response JSON includes usage summary (input, output, cacheRead, provider, model)
+- [ ] Cost reporting skips when totalTokens is 0
+- [ ] Cost reporting failure does not block /invoke response
+- [ ] Token usage visible in Paperclip cost dashboard
 - [ ] .env.example updated with new env vars
 - [ ] tasks/todo.md updated
 

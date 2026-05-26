@@ -23,7 +23,12 @@ src/agents/
     web-scrape.ts           Web scraping tool
     escalate.ts             Human escalation via Paperclip issues
     artifacts.ts            Shared artifact helpers
-    logging.ts              Structured logging extension
+    logging.ts              OTel-backed logging (uses logging/ subdir, pi-otel + Aspire Dashboard)
+    logging/                Submodules for logging extension
+      types.ts              LogEntry, LogLevel types
+      buffer.ts             Ring buffer for in-memory log queries
+      jsonl.ts              JSONL file writer (/artifacts/{agent}/run.log.jsonl)
+      otel.ts               pi-otel event bus integration (structured logs to Aspire)
     deep-research.ts        Multi-iteration research tool (uses deep-research/ subdir)
     deep-research/          Engine, prompts, cache, types, validators, concurrency for deep research
       config.ts             Named constants (caps, concurrency limits, content thresholds)
@@ -118,26 +123,31 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - DeepSeek handles tool calling reliably; Groq is flaky with function calls — avoid for agentic web search tasks
 - Test extensions locally via bash: `pi --mode json -e extensions/web-search.ts -p "query"` (PowerShell cannot capture Pi stdout)
 
-## Agent escalation
+## Agent escalation and Discord
 
-- `escalate` tool (src/agents/extensions/escalate.ts) lets agents pause and request human input via Paperclip issues
-- Requires env vars: `PAPERCLIP_API_URL`, `PAPERCLIP_ADMIN_EMAIL`, `PAPERCLIP_ADMIN_PASS`, `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID`
-- Agent IDs set per-container in docker-compose.yml via `CEO_AGENT_ID` / `RESEARCHER_AGENT_ID` in `.env`
-- Auth is session-cookie based (no API keys) — extension signs in as admin to create issues and pause agents
-- Creates issue with `escalation` label, pauses agent, returns tool result telling LLM to wait
-- On resume, LLM checks issue comments via Paperclip skills (paperclip_get_issue, paperclip_list_comments)
-- `PAPERCLIP_PUBLIC_URL` must be set to `http://paperclip:3100` (docker hostname) for container-to-Paperclip auth to work
+- Escalation handled by `paperclip-plugin-discord` (community plugin, v0.7.3, installed in Paperclip instance)
+- Plugin provides `escalate_to_human` tool with conversation context, suggested replies, interactive Discord buttons, configurable timeout
+- Plugin subscribes to Paperclip events (issue.created, approval.created, agent.error) and posts Discord embeds automatically
+- Human replies in Discord threads become Paperclip issue comments; agent wakes via `PAPERCLIP_WAKE_COMMENT_ID`
+- Paperclip's built-in interaction API covers structured HITL: `ask_user_questions` (forced-choice only, no free text), `request_confirmation` (accept/reject with optional reason), `suggest_tasks` (all-or-nothing accept)
+- Plugin config via `POST /api/plugins/{id}/config` — requires Discord bot token (stored as Paperclip secret), channel ID, guild ID
+- Sibling plugins exist for Telegram (`paperclip-plugin-telegram`) and Slack (`paperclip-plugin-slack`) using shared `PlatformAdapter` from `paperclip-plugin-chat-core`
+- Custom `escalate.ts` disabled in bridge.mjs but file retained for potential future fork/extension
+- Setup spec: `tasks/specs/discord-plugin-setup.md`
 
 ## Agent web scraping
 
 - 4-tier scraping: static (cheerio), stealth (Scrapling Fetcher), browser (Scrapling DynamicFetcher), cloud (Apify)
+- Architecture: fetch decoupled from parse. Python scripts return raw HTML. Cheerio handles all extraction (one parser for T1/T2/T3). T4 bypasses parse (Apify returns structured data).
+- Challenge detection between fetch and parse: identifies Cloudflare, DataDome, PerimeterX, AWS WAF
+- Diagnostic output on zero items: HTTP status, HTML length, challenge vendor, selector match count, page title
 - Extension: `src/agents/extensions/web-scrape.ts` — conditionally registers tools based on available deps
-- Python workers: `scripts/scrape_stealth.py` (researcher + data), `scripts/scrape_browser.py` (data only)
-- Tool registration is conditional: cheerio → tier 1, Scrapling Fetcher → tier 2, marker file `/app/.browsers-installed` → tier 3, Apify → always
+- Python fetch-only scripts: `scripts/scrape_stealth.py` (researcher + data), `scripts/scrape_browser.py` (data only). Input: `{url, wait_for?}`. Output: `{html, status_code, url, duration_ms, errors}`.
+- Tool registration: cheerio -> T1, scrapling Fetcher + cheerio -> T2, `.browsers-installed` marker + cheerio -> T3, Apify -> always
 - Researcher image: lightweight (Python + scrapling Fetcher + cheerio, ~600MB)
 - Data image: heavy (Python + scrapling[fetchers] + Chromium + Playwright, ~1.5GB, 2G memory limit)
 - Requires `APIFY_API_TOKEN` env var for tier 4 tools
-- Test infrastructure: `tests/scraping/` (fixtures, runner, unit tests), `tests/e2e/e2e-9-scraping.sh`
+- Test infrastructure: `tests/scraping/sites.json` (data-driven config), `tests/scraping/real-world-tests.sh` (generic runner), `tests/e2e/e2e-9-scraping.sh`
 
 ## Bespoke Docker images
 
@@ -148,6 +158,21 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - Data uses `src/agents/data/Dockerfile` (heavy bespoke: Python + scrapling[fetchers] + Chromium)
 - Bespoke Dockerfiles don't use AGENT_NAME arg — paths are hardcoded
 - Agent-specific scripts go in `src/agents/{agent}/scripts/`, copied to `/app/scripts/` in container
+
+## Observability (OTel + Aspire Dashboard)
+
+- pi-otel extension installed in all agent containers — automatic tracing of LLM calls, tool executions, agent turns
+- Aspire Dashboard container in docker-compose at http://localhost:18888 — traces, structured logs, metrics
+- pi-otel exports via OTLP gRPC to `dashboard:18889`
+- Each agent's `.pi/agent/settings.json` has `otel` config with per-agent `serviceName`
+- Span hierarchy: `pi.interaction` → `pi.turn` → `pi.llm_request` / `pi.tool.<name>`
+- logging.ts extension emits structured logs to dashboard via `pi.events.emit("pi-otel:log", ...)`
+- logging.ts also writes JSONL to `/artifacts/{agent}/run.log.jsonl` and maintains in-memory ring buffer
+- Tools: `log_event` (structured logging), `get_log` (query buffer), `get_trace_id` (cross-agent correlation)
+- Bridge generates W3C TRACEPARENT per /invoke request, propagates to Pi process
+- Bridge extracts token usage from `turn_end` events, POSTs to Paperclip cost-events API
+- Response JSON includes `trace_id` and `usage` summary
+- Tests: `node --test tests/logging/unit-test.mjs` (23 tests)
 
 ## Inter-agent artifact sharing
 

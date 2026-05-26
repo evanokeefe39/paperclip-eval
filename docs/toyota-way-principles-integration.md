@@ -123,32 +123,26 @@ Every agent workspace follows the same structure:
   output/               — completed deliverables
   context/              — injected context (skills, briefs, goal ancestry)
   logs/                 — execution logs
-  .pending-escalation   — state file for async escalation/ask-user flows
+  (escalation state managed by Paperclip — no local files needed)
   .workspace-meta       — agent ID, role, last heartbeat, current issue ID
 ```
 
 Uniformity enables meta-agents to visit any workspace and know where to find learnings, output, logs, and metrics without agent-specific knowledge.
 
-### Escalate Tool (Pi Extension)
+### Escalate Tool
 
-A generic escalation tool replacing ask_user. Registered tool name: `escalate`. Parameters:
+> **2026-05-26 — STALE:** This section described a custom Pi extension (`escalate.ts`) with
+> `ASK_USER_MODE` switching, `.pending-escalation` state files, and direct Discord/Telegram
+> webhook calls. Superseded by `paperclip-plugin-discord` (community plugin, installed via
+> Paperclip plugin system) which provides `escalate_to_human` with richer features: conversation
+> context, confidence scoring, suggested replies, interactive buttons, configurable timeout.
+> The plugin uses Paperclip's event system and `PlatformAdapter` abstraction from
+> `paperclip-plugin-chat-core`. Sibling plugins exist for Telegram and Slack.
+> See `tasks/specs/discord-plugin-setup.md` for current approach.
 
-- `type` (required): one of `ask_user`, `block_for_review`, `request_decision`, `report_failure`, `flag_for_kaizen`
-- `question` (required): the question or description
-- `context` (optional): relevant context summary
-- `options` (optional): structured choices
-- `severity` (optional): `info`, `warning`, `critical`
-- `allowFreeform` (optional, default true): whether freeform responses are accepted
+Escalation is handled by the `escalate_to_human` tool provided by `paperclip-plugin-discord`. The plugin subscribes to Paperclip events, posts rich Discord embeds with interactive buttons (Reply, Override, Use Suggested Reply, Dismiss), and routes human responses back as issue comments. Configurable timeout (default 30 min) with auto-resolution. No custom Pi extension, no local state files, no direct webhook calls from agent containers.
 
-Behavior depends on environment:
-
-In local/dev mode (ASK_USER_MODE=local): renders the interactive TUI for ask_user type. Other types log to console and pause for confirmation.
-
-In remote/prod mode (ASK_USER_MODE=remote): posts the escalation to Discord/Telegram via webhook (formatting varies by type). Calls Paperclip API to mark current issue blocked with a comment containing the escalation details. Writes pending state to `.pending-escalation` in workspace. Exits the heartbeat run. No process is held open.
-
-Return path: when human responds (via Discord bot interaction), the bot posts the answer as a Paperclip issue comment, unblocks the issue, and the next heartbeat picks up the response from wake context.
-
-The type parameter determines routing. `ask_user` goes to a Discord channel and waits for a response. `block_for_review` sets the issue to in_review in Paperclip. `report_failure` triggers creation of a 5 whys investigation issue. `flag_for_kaizen` writes to the kaizen metrics pipeline. Every type marks the issue blocked and exits the heartbeat.
+Paperclip's built-in interaction API (`ask_user_questions`, `request_confirmation`, `suggest_tasks`) covers structured input scenarios. The plugin's escalation system covers unstructured/contextual escalation. Together they handle the full escalation primitive set. See gap analysis in `tasks/specs/discord-plugin-setup.md`.
 
 ### Paperclip Skill
 
@@ -376,9 +370,9 @@ Do not build everything at once. Each addition should solve a problem already ex
 
 Phase 1: Set up Paperclip with the four agents (CEO, researcher, QA, publisher). Define the org chart, goals, and projects. Write the core skills for each agent. Run the pipeline manually — CEO creates briefs, researcher works them, you act as QA, publisher produces content. Identify where it breaks.
 
-Phase 2: Add the pipeline controller plugin for automated handoffs. Add the verification plugin to catch recurring structural failures. Add the escalate tool with local mode only. Standardize the workspace filesystem layout.
+Phase 2: Add the pipeline controller plugin for automated handoffs. Add the verification plugin to catch recurring structural failures. Configure `paperclip-plugin-discord` for escalations and notifications (replaces custom escalate tool). Standardize the workspace filesystem layout.
 
-Phase 3: Add MinIO for artifact storage. Set up the sidecar sync from agent workspaces to MinIO. Add the shared storage skill so agents can query prior artifacts. Add the Discord bridge for remote-mode escalation.
+Phase 3: Add MinIO for artifact storage. Set up the sidecar sync from agent workspaces to MinIO. Add the shared storage skill so agents can query prior artifacts. Add Telegram/Slack plugins alongside Discord if needed.
 
 Phase 4: Add observability instrumentation. Start collecting execution-level metrics alongside Paperclip's issue-level data. Add the kaizen consolidation and reporting.
 

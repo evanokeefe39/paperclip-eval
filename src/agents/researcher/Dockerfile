@@ -10,6 +10,8 @@ RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 RUN pip3 install --break-system-packages "scrapling[fetchers]"
 RUN npm install -g cheerio
 
+ENV NODE_PATH=/usr/local/lib/node_modules
+
 WORKDIR /app
 
 COPY bridge.mjs .
@@ -22,7 +24,7 @@ COPY researcher/.pi/agent/auth.json /root/.pi/agent/auth.json
 COPY researcher/AGENTS.md /app/AGENTS.md
 COPY researcher/scripts/ /app/scripts/
 
-RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents || true
+RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents npm:pi-otel || true
 
 RUN mkdir -p /workspace
 

@@ -1,3 +1,21 @@
+# STALE — Superseded by paperclip-plugin-discord
+
+> **2026-05-26:** This spec assumed we needed to build a custom adapter service for Discord
+> notifications. Investigation found that Paperclip has a fully developed plugin system (69
+> capabilities, event subscriptions, webhooks, outbound HTTP) and that a community plugin
+> `paperclip-plugin-discord` (mvanhorn, v0.7.3, 323 tests) already provides everything
+> specced here and more — including `escalate_to_human` tool, interactive approval buttons,
+> reply routing, slash commands, multi-agent threads, and a shared `PlatformAdapter`
+> abstraction via `paperclip-plugin-chat-core`. Sibling plugins exist for Telegram and Slack.
+>
+> Replacement spec: `tasks/specs/discord-plugin-setup.md`
+>
+> Kept for historical context. Do not implement.
+
+---
+
+# (Original spec below — do not implement)
+
 # Escalation Notification System — Discord Adapter
 
 ## Intent
