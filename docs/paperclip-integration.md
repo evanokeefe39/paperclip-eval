@@ -151,14 +151,14 @@ Paperclip runs in `authenticated` mode with `private` exposure:
 
 Local adapters (claude_local, pi_local) automatically receive Paperclip's MCP tools via a built-in MCP server subprocess. The HTTP adapter does not — it simply POSTs a JSON payload to the agent URL with no tool injection.
 
-To give HTTP-adapter agents the same coordination capabilities, the project includes a Pi extension at `src/agents/skills/paperclip-tools.ts` that re-implements all 40 Paperclip MCP tools as Pi-native tools. These tools wrap the Paperclip REST API using Bearer token auth with per-agent API keys.
+To give HTTP-adapter agents the same coordination capabilities, the project includes a Pi extension at `src/agents/extensions/paperclip/index.ts` that re-implements all 40 Paperclip MCP tools as Pi-native tools. These tools wrap the Paperclip REST API using Bearer token auth with per-agent API keys.
 
 ### How it works
 
-1. `skills/client.ts` exports a shared API client that authenticates via Bearer token using the per-agent `PAPERCLIP_API_KEY` environment variable
-2. `skills/paperclip-tools.ts` is a Pi extension that registers 40 tools covering the full Paperclip API surface
-3. The bridge loads the extension via `-e /app/skills/paperclip-tools.ts` in the Pi spawn args
-4. The Dockerfile copies `skills/` into `/app/skills/` in the container image
+1. `extensions/paperclip/_client.ts` exports a shared API client that authenticates via Bearer token using the per-agent `PAPERCLIP_API_KEY` environment variable
+2. `extensions/paperclip/index.ts` is a Pi extension that registers 40 tools covering the full Paperclip API surface
+3. Pi discovers the extension natively from `/root/.pi/agent/extensions/paperclip/index.ts` — no `-e` flag required
+4. The Dockerfile copies `extensions/paperclip/` into the container image at the Pi-native discovery path
 
 ### Tool categories
 
@@ -266,7 +266,7 @@ The execute endpoint accepts a JSON body:
 
 The tool name is prefixed with the plugin's UUID and a colon. The `runContext` provides the calling agent's identity and current issue so the plugin can act on behalf of that agent.
 
-In this project, the `skills/client.ts` shared API client handles authentication for these calls using the same Bearer token mechanism used by the Paperclip skills extension.
+In this project, the `extensions/paperclip/_client.ts` shared API client handles authentication for these calls using the same Bearer token mechanism used by the Paperclip skills extension.
 
 ## Discord Plugin
 
@@ -327,7 +327,7 @@ The v2 extension selects its backend based on the `PAPERCLIP_DISCORD_PLUGIN_ID` 
 | unset | local | Creates an issue with "escalation" label, then calls `request_confirmation` (or `ask_user_questions` if structured inputs provided) via the Paperclip interactions API. Sets `continuationPolicy=wake_assignee` so the agent resumes when the human responds. |
 | set (plugin UUID) | discord | Calls `POST /api/plugins/tools/execute` with tool `{pluginId}:escalate_to_human`, delegating the full escalation flow to the Discord plugin. |
 
-Both backends use the shared `skills/client.ts` API client for authentication. The tool interface is identical regardless of backend -- agents call `escalate` with the same parameters and get consistent behavior.
+Both backends use the shared `extensions/paperclip/_client.ts` API client for authentication. The tool interface is identical regardless of backend -- agents call `escalate` with the same parameters and get consistent behavior.
 
 | Variable | Purpose |
 |----------|---------|

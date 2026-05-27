@@ -35,4 +35,4 @@ templates/
 
 ## Template loading
 
-Templates are copied into agent containers at build time (Dockerfile COPY). The artifacts extension reads them from `/app/templates/` inside the container and uses them for workspace initialization and output validation.
+Templates live inside the `workproduct/` extension directory and are copied into agent containers as part of the extensions COPY in the Dockerfile base stage. The artifacts extension reads them from `/root/.pi/agent/extensions/workproduct/templates/` inside the container and uses them for workspace initialization and output validation.

@@ -557,10 +557,10 @@ The MCP server source is at `packages/mcp-server/src/tools.ts` in the Paperclip 
 
 Created Pi extensions at `src/agents/skills/` that re-implement all 40 Paperclip MCP tools as Pi-native tools:
 
-- `client.ts` — shared Paperclip API client using session-cookie auth (matching the existing escalate.ts pattern) with a 25-minute session cache
-- `paperclip-tools.ts` — Pi extension that registers all 40 tools with TypeBox schemas
+- `_client.ts` — shared Paperclip API client using session-cookie auth (matching the existing escalate.ts pattern) with a 25-minute session cache
+- `paperclip/index.ts` — Pi extension that registers all 40 tools with TypeBox schemas
 
-The extension is loaded via `-e /app/skills/paperclip-tools.ts` in bridge.mjs spawn args. The Dockerfile copies `skills/` into `/app/skills/`.
+The extension lives at `src/agents/extensions/paperclip/index.ts` and is discovered by Pi natively from `~/.pi/agent/extensions/` inside the container.
 
 ### Key details
 
@@ -586,7 +586,7 @@ The extension is loaded via `-e /app/skills/paperclip-tools.ts` in bridge.mjs sp
 
 - Upstream MCP server: `packages/mcp-server/src/tools.ts` in the Paperclip repo
 - Upstream client: `packages/mcp-server/src/client.ts`
-- Local extension: `src/agents/skills/paperclip-tools.ts`
+- Local extension: `src/agents/extensions/paperclip/index.ts`
 - Tests: `tests/paperclip-tools/unit-test.mjs` (162 tests), `tests/paperclip-tools/integration-test.sh`
 
 ---
@@ -672,7 +672,7 @@ Scrapling's API is unstable between minor versions. Pin the version in Dockerfil
 ### References
 
 - Python scripts: `src/agents/{researcher,data}/scripts/scrape_stealth.py`, `src/agents/data/scripts/scrape_browser.py`
-- Extension: `src/agents/extensions/web-scrape.ts`
+- Extension: `src/agents/extensions/web-scrape/`
 - Dockerfiles: `src/agents/{researcher,data}/Dockerfile`
 
 ---
@@ -726,7 +726,7 @@ Install cheerio locally in `/app` during the Dockerfile build: `cd /app && npm i
 
 ### Key details
 
-- Only affects the test runner's inline Node scripts — the web-scrape.ts extension uses its own import path (loaded by Pi, which has its own module resolution)
+- Only affects the test runner's inline Node scripts — the web-scrape extension (`web-scrape/index.ts`) uses its own import path (loaded by Pi, which has its own module resolution)
 - The docker compose exec `-e` flag behavior may differ between Docker Compose v1 and v2
 - Fix applied in `tests/scraping/real-world-tests.sh` line 54
 

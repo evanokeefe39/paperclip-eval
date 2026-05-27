@@ -59,9 +59,9 @@ Before marking any issue complete, verify your own output:
 If any check fails, fix it before marking done. If you cannot fix it, stop the line.
 ```
 
-**Extension requirement:** `escalate.ts` on every agent (the andon cord).
+**Extension requirement:** `escalate/` on every agent (the andon cord).
 
-**Logging requirement:** Every stop event written to `learnings.md` and captured by `logging.ts`.
+**Logging requirement:** Every stop event written to `learnings.md` and captured by `logging/index.ts`.
 
 ---
 
@@ -162,11 +162,11 @@ Work products are the standardized work of TPS applied to agent output. They enf
 
 | Product | Extension | Producing Agents | Consuming Agents |
 |---------|-----------|-----------------|-----------------|
-| Finding | `findings.ts` | Researcher, Data | Writer, CEO, QA |
+| Finding | `workproduct/index.ts` | Researcher, Data | Writer, CEO, QA |
 
 **Pattern for new work products:**
 
-Every standardized work product extension imports shared primitives from `extensions/workproduct/` (ULID generation, JSONL storage, two-level validation) and defines its own schemas, style profiles, domain logic, and tools. See architecture.md Extension Architecture section for the technical pattern.
+Every standardized work product extension imports shared primitives from `extensions/workproduct/index.ts` (ULID generation, JSONL storage, two-level validation) and defines its own schemas, style profiles, domain logic, and tools. See architecture.md Extension Architecture section for the technical pattern.
 
 The decision to standardize a work product — versus leaving it as freeform artifact content — should be driven by whether downstream agents need to query, filter, or grade instances of that product. If an output is consumed as a whole document (a research report, a content draft), it stays as a template-governed artifact. If individual claims, data points, assessments, or verdicts within the output need to be individually addressable, queryable, and gradable, it becomes a standardized work product.
 
@@ -516,7 +516,7 @@ Gitignored. Copied from root `auth.json` during setup. Contains provider-keyed A
 
 ## Part 4: Templates
 
-All templates live as files in `src/agents/templates/`. They are COPYed into containers at `/app/templates/` during Docker build. Agents access them at runtime through the artifacts extension's `get_template()` tool.
+All templates live as files in `src/agents/templates/`. They are COPYed into containers at `/root/.pi/agent/extensions/workproduct/templates` during Docker build. Agents access them at runtime through the artifacts extension's `get_template()` tool.
 
 ### 4.1 Issue Brief Templates (Poka-Yoke Layer)
 
@@ -568,7 +568,7 @@ Used by the learnings drain process and meta-agents for centralized artifacts in
 src/agents/templates/        Source of truth (in repo, version controlled)
        │
        ▼  (Docker COPY at build time)
-/app/templates/              Read-only inside container
+/root/.pi/agent/extensions/workproduct/templates    Read-only inside container
        │
        ├── artifacts extension: get_template() tool reads from here
        ├── artifacts extension: init_workspace() copies workspace/ templates to /artifacts/{agent}/
@@ -919,7 +919,7 @@ Changes to templates go through the repo (PR, review, merge) and take effect on 
 
 Three extensions load on every agent. They form the shared infrastructure layer.
 
-### 6.1 escalate.ts — Andon Cord
+### 6.1 escalate/index.ts — Andon Cord
 
 The system-wide mechanism for any agent to stop and signal. Five escalation types:
 
@@ -931,9 +931,9 @@ The system-wide mechanism for any agent to stop and signal. Five escalation type
 | `report_failure` | Unrecoverable error after retry exhaustion | Issue blocked, 5-whys investigation created |
 | `flag_for_kaizen` | Agent detects a process improvement opportunity | Logged to kaizen pipeline, issue continues |
 
-Current implementation status: `escalate.ts` exists but only supports `message` + `urgency`. Needs upgrade to the 5-type model.
+Current implementation status: `escalate/index.ts` exists but only supports `message` + `urgency`. Needs upgrade to the 5-type model.
 
-### 6.2 artifacts.ts — Shared Storage Protocol
+### 6.2 artifacts/index.ts — Shared Storage Protocol
 
 Manages read/write to the shared artifacts volume with path conventions, metadata sidecars, and discovery.
 
@@ -948,7 +948,7 @@ Enforces:
 - Write isolation: agents write only to their own namespace
 - Read access: all agents can read all of /artifacts
 
-### 6.3 logging.ts — Structured Observability
+### 6.3 logging/index.ts — Structured Observability
 
 Captures every tool call, error, escalation, and significant decision in structured JSON format.
 
@@ -1081,10 +1081,10 @@ All containers share the `agents_default` bridge network. Internal hostnames: `p
 
 ### 8.5 Templates
 
-Canonical templates at `src/agents/templates/` in the repo. Copied into every container at `/app/templates/` during Docker build. Agents access them through the artifacts extension's `get_template()` tool.
+Canonical templates at `src/agents/templates/` in the repo. Copied into every container at `/root/.pi/agent/extensions/workproduct/templates` during Docker build. Agents access them through the artifacts extension's `get_template()` tool.
 
 ```
-/app/templates/
+/root/.pi/agent/extensions/workproduct/templates/
   briefs/             Issue templates (CEO creates work using these)
     research-brief.md
     analysis-brief.md
@@ -1193,7 +1193,7 @@ For each new agent, complete every item:
 - [ ] Verify `settings.json` extensions match the role
 
 ### Infrastructure
-- [ ] Add service to `docker-compose.yml` with correct extension `-e` flags
+- [ ] Add service to `docker-compose.yml` and Dockerfile with correct extensions copied to `/root/.pi/agent/extensions/`
 - [ ] Add agent registration to `setup.sh`
 - [ ] Add `{NAME}_AGENT_ID` to `.env.example`
 - [ ] Configure wake strategy (heartbeat vs. wake-on-demand)
@@ -1244,17 +1244,17 @@ src/agents/{name}/
 
 ## Appendix B: Extension Loading Matrix
 
-Reflected in docker-compose.yml as `-e` flags passed to bridge.mjs spawn args.
+Extensions are discovered natively by Pi from `/root/.pi/agent/extensions/`. Bridge no longer passes `-e` flags. The Dockerfile controls which extensions are present on disk per agent; Pi auto-discovers all `*.ts` files and `*/index.ts` subdirectories at startup.
 
 ```
-CEO:          -e extensions/escalate.ts -e extensions/artifacts.ts -e extensions/logging.ts
-Researcher:   -e extensions/escalate.ts -e extensions/artifacts.ts -e extensions/logging.ts -e extensions/web-search.ts -e extensions/web-fetch.ts
-Analyst:      -e extensions/escalate.ts -e extensions/artifacts.ts -e extensions/logging.ts
-Data Engineer:-e extensions/escalate.ts -e extensions/artifacts.ts -e extensions/logging.ts -e extensions/web-scrape.ts
-Dev:          -e extensions/escalate.ts -e extensions/artifacts.ts -e extensions/logging.ts
-Writer:       -e extensions/escalate.ts -e extensions/artifacts.ts -e extensions/logging.ts
-QA:           -e extensions/escalate.ts -e extensions/artifacts.ts -e extensions/logging.ts
-Publisher:    -e extensions/escalate.ts -e extensions/artifacts.ts -e extensions/logging.ts
+CEO:          escalate/  artifacts/  logging/  paperclip/
+Researcher:   escalate/  artifacts/  logging/  paperclip/  web-search/  web-fetch/
+Analyst:      escalate/  artifacts/  logging/  paperclip/
+Data Engineer:escalate/  artifacts/  logging/  paperclip/  web-scrape/
+Dev:          escalate/  artifacts/  logging/  paperclip/
+Writer:       escalate/  artifacts/  logging/  paperclip/  writing-style/
+QA:           escalate/  artifacts/  logging/  paperclip/
+Publisher:    escalate/  artifacts/  logging/  paperclip/
 ```
 
-Future role-specific extensions (org-data-query, deep-research, quality-checker, publishing tools) added to the relevant lines as implemented.
+Future role-specific extensions (org-data-query, deep-research, quality-checker, publishing tools) added by copying them into the agent's Dockerfile COPY list.

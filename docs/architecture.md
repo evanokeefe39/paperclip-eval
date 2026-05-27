@@ -46,7 +46,7 @@
 - Role: HTTP-to-RPC translation layer between Paperclip and Pi
 - Stateless per-request: each invocation spawns a fresh Pi process
 - Each container runs `bridge.mjs` as its entrypoint
-- Pi extensions loaded at spawn: web-search, web-fetch, escalate (v2, local/discord backend), web-scrape, paperclip-tools, artifacts, logging
+- Pi extensions loaded natively by Pi from `/root/.pi/agent/extensions/`: web-search, web-fetch, escalate (v2, local/discord backend), web-scrape, paperclip, artifacts, logging
 - Paperclip behavioral skills loaded via Pi's native `--skill` flag: paperclip (heartbeat protocol), paperclip-converting-plans-to-tasks, para-memory-files
 - pi-otel installed for automatic OTel tracing (pi.interaction → pi.turn → pi.llm_request / pi.tool.* spans)
 
@@ -125,13 +125,13 @@ The `config.yml` defines model roles (smol, default, agentic, plan, review, comm
 
 ## Extension Architecture
 
-Pi extensions are TypeScript files loaded via `-e` flags at spawn time. They register tools that the LLM can call during execution.
+Pi extensions are TypeScript files discovered natively by Pi from `/root/.pi/agent/extensions/`. Pi loads flat `*.ts` files and `*/index.ts` subdirectory entry points. The bridge no longer passes `-e` flags; discovery is handled entirely by Pi at startup.
 
 ```
-/app/extensions/             Custom tools (web search, fetch, escalate, etc.)
-/app/skills/                 Paperclip platform tools (REST API wrappers)
-  client.ts                  Shared auth client — Bearer token auth via per-agent API key
-  paperclip-tools.ts         40 tools matching upstream MCP server (issues, comments,
+/root/.pi/agent/extensions/  All extensions (custom tools + Paperclip platform tools)
+  paperclip/                 Paperclip platform tools (REST API wrappers)
+    _client.ts               Shared auth client — Bearer token auth via per-agent API key
+    index.ts                 40 tools matching upstream MCP server (issues, comments,
                              documents, agents, projects, goals, interactions, approvals,
                              workspace runtime, escape hatch)
   paperclip-skills/          Behavioral skills (SKILL.md files from Paperclip repo)
@@ -144,7 +144,7 @@ The Paperclip tools extension exists because the HTTP adapter does not inject MC
 
 The Paperclip behavioral skills exist for the same reason — local adapters get them via `syncSkills` (symlinked into agent CLI discovery path). HTTP adapter agents don't. setup.sh fetches SKILL.md files from GitHub and bridge.mjs loads them via Pi's native `--skill` flag with progressive disclosure (only descriptions in context until the agent needs full content).
 
-Extensions can import from relative paths (e.g., `paperclip-tools.ts` imports from `./client.js`). Pi resolves these at load time. Cross-directory imports also work (e.g., `escalate.ts` imports from `../skills/client.js`).
+Extensions can import from relative paths (e.g., `extensions/paperclip/index.ts` imports from `./_client.js`). Pi resolves these at load time.
 
 ### Standardized Work Products (workproduct/)
 
@@ -155,8 +155,9 @@ Shared primitives live in `extensions/workproduct/`:
 ```
 extensions/workproduct/
   ulid.ts       Monotonic ULID generator (Crockford Base32, no deps)
-  storage.ts    JSONL append/read/update, cross-agent scan, path conventions, session ID
   validate.ts   Two-level required/encouraged field validation framework
+  index.ts      Findings work product (entry point — ADMIRALTY grading, record/query/get tools)
+  templates/    Document templates (container path: /root/.pi/agent/extensions/workproduct/templates)
 ```
 
 Each work product is a standalone extension that imports from `workproduct/` and defines its own:
@@ -167,18 +168,18 @@ Each work product is a standalone extension that imports from `workproduct/` and
 - **Tools** — record, query, get, and any product-specific operations
 - **Prompt snippets** — per-style context injected into the agent's system prompt
 
-Storage convention: `/artifacts/{agent}/{product-type}/{session-id}.jsonl`. Every record gets a ULID, a session ID, and an agent name. Cross-agent retrieval uses `scanAllAgents()` from `storage.ts`.
+Storage convention: `/artifacts/{agent}/{product-type}/{session-id}.jsonl`. Every record gets a ULID, a session ID, and an agent name. Cross-agent retrieval uses the artifact-client query API.
 
 Validation is two-level: required field absence is a hard error (tool rejects the call), encouraged field absence is a warning (tool records the product with warnings returned to the agent). This prevents agents from hallucinating metadata to satisfy strict requirements — a product with honest gaps is better than one with fabricated fields.
 
 To add a new work product:
 
-1. Create `extensions/{product}.ts`
-2. Import `ulid`, storage helpers, and `validateByStyle` from `workproduct/`
+1. Create `extensions/{product}/index.ts`
+2. Import `ulid` and `validateByStyle` from `workproduct/`
 3. Define TypeBox schemas for the product's data model
 4. Define `StyleProfiles` with required/encouraged fields per style
 5. Register tools: record, query, get, and any product-specific operations
-6. Load via `-e` flag in bridge.mjs for relevant agents
+6. Pi discovers the new subdirectory entry point automatically
 
 ### Escalate Extension (v2)
 
@@ -187,11 +188,11 @@ The `escalate.ts` extension registers a single `escalate` tool that presents a u
 - Discord mode: when `PAPERCLIP_DISCORD_PLUGIN_ID` is set, the tool calls `POST /api/plugins/tools/execute` with `{pluginId}:escalate_to_human`. The plugin posts an interactive Discord embed with buttons. Human responses flow back through Discord threads into Paperclip issue comments.
 - Local mode: when the env var is absent, the tool creates a Paperclip issue with an `escalation` label and attaches either a `request_confirmation` or `ask_user_questions` interaction (depending on whether the agent supplied structured inputs). The agent is paused and waits for human response in the Paperclip UI.
 
-Both paths use the shared `skills/client.ts` for Bearer token auth via per-agent API key. The old v1 implementation is preserved as `escalate-v1.ts`.
+Both paths use the shared `extensions/paperclip/_client.ts` for Bearer token auth via per-agent API key. The old v1 implementation is preserved as `escalate-v1.ts`.
 
 ### Deep Research Module
 
-The `deep-research.ts` extension delegates to a 15-file submodule at `extensions/deep-research/`. Key architectural patterns:
+The `deep-research/index.ts` extension delegates to a submodule at `extensions/deep-research/`. Key architectural patterns:
 
 - **Async I/O throughout**: `store.ts`, `checkpoint.ts`, and `query.ts` use `fs/promises` for all file operations (no blocking the event loop during multi-wave research runs). The only sync calls are `existsSync` guards and `readFileSync` in the checkpoint constructor for initial load.
 - **Concurrency control**: `semaphore.ts` provides a counting semaphore that caps concurrent LLM calls (`max_concurrent_llm`) and concurrent page fetches (`max_concurrent_fetch`), configured via named constants in `config.ts`.

@@ -40,7 +40,7 @@ Patterns and corrections from implementation cycles. Review before starting work
 
 **Root cause:** Extension loading was owned by the bridge (runtime) instead of the Dockerfile (devtime).
 
-**Rule:** Bridge autodiscovers all `.ts` files in `/app/extensions/` and `/app/skills/` at startup. Files prefixed with `_` are skipped (convention for libraries/disabled files). What's on disk IS the config — controlled by Dockerfile COPY. No env vars, no hardcoded lists.
+**Rule:** Pi does native extension discovery from `~/.pi/agent/extensions/` — it loads flat `*.ts` files and `*/index.ts` subdirectory entries. The bridge plays no role in extension discovery. What's on disk IS the config — controlled by Dockerfile COPY into that path. No env vars, no hardcoded lists, no bridge-level autodiscovery.
 
 ---
 
