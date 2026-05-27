@@ -1,3 +1,39 @@
+# M0.1: Faceless Channel Analysis — Subsystems Wired
+
+Same brief as M0, all subsystems operational. See `MILESTONE.md` for full criteria.
+
+## Pre-flight: Verify each subsystem independently
+
+- [ ] Logging: agent turn produces structured logs in Aspire Dashboard
+- [ ] Findings: Researcher extension writes ADMIRALTY-graded finding to JSONL
+- [ ] Workproduct validation: required/encouraged fields pass validate.ts checks
+- [ ] Artifacts: agent writes file to `/artifacts/{agent}/`, another agent reads it
+- [ ] Permissions: 2-layer model active, BRIDGE_EXTENSIONS env var removed from all agent .env files
+- [ ] CEO prompt: explicitly forbids direct work, requires delegation for all research tasks
+- [ ] Researcher prompt: requires writing findings via workproduct system, not just issue comments
+- [ ] Writer prompt: reads findings from artifact paths, synthesizes into report artifact
+
+## Execution
+
+- [ ] Create initial Paperclip issue (same faceless channel analysis brief as M0)
+- [ ] CEO decomposes and delegates — verify no direct work attempts
+- [ ] Researcher completes IG research — verify findings JSONL written
+- [ ] Researcher completes TikTok research — verify findings JSONL written
+- [ ] Writer picks up findings — verify it reads from artifact paths
+- [ ] Writer produces final report artifact
+- [ ] All status transitions through Paperclip (checkout → in_progress → done)
+
+## Validation
+
+- [ ] Aspire Dashboard shows full trace for each agent's turns
+- [ ] `/artifacts/researcher/` contains structured findings files
+- [ ] `/artifacts/writer/` contains final report
+- [ ] No BRIDGE_EXTENSIONS env var in any running container
+- [ ] Workproducts have ULIDs, session IDs, validated field structure
+- [ ] Report contains cross-platform comparison and actionable insights
+
+---
+
 # Artifact Store v2: Bun Service + Postgres + MinIO
 
 Spec: `tasks/specs/artifact-store-v2.md`

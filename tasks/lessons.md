@@ -26,11 +26,41 @@ Patterns and corrections from implementation cycles. Review before starting work
 
 ## 2026-05-27: CEO must not have work tools
 
-**What happened:** CEO had web-search, web-fetch, web-scrape, duckdb loaded. When given tasks, it did the work itself instead of delegating to specialist agents.
+**What happened:** CEO had web-search, web-fetch, web-scrape, duckdb loaded. When given tasks, it did the work itself instead of delegating to specialist agents. Even after removing extensions, CEO attempted bash/curl workarounds, tried the `subagent` Pi tool, and used `paperclip_api_request` as an escape hatch.
 
-**Root cause:** No Paperclip mechanism for tool-gating by role. Agent uses shortest path to "done" — if tools are available, it uses them.
+**Root cause:** LLMs use the shortest path to "done." If tools are available, they use them. Prompt-only guardrails are unreliable (~60-70%). Need technical enforcement.
 
-**Rule:** CEO gets coordination tools only (paperclip-tools, artifacts, logging, escalate). Use `BRIDGE_EXTENSIONS` env var to override. Remove work tools from any planner/coordinator agent.
+**Rule:** Two-layer access control. Layer 1: Dockerfile selective COPY — only copy extensions the agent needs. Layer 2: pi-permissions.jsonc — deny specific tools within loaded extensions. Denied tools are filtered from agent context at startup — LLM never sees them. For CEO specifically: deny bash, write, edit, checkout, upsert_document, api_request. Keep only read-only + coordination tools.
+
+---
+
+## 2026-05-27: Autodiscovery replaces hardcoded extension lists
+
+**What happened:** bridge.mjs had a hardcoded DEFAULT_EXTENSIONS array and a BRIDGE_EXTENSIONS env var override. Adding/removing extensions required editing JavaScript or docker-compose env vars — runtime decisions for what should be devtime config.
+
+**Root cause:** Extension loading was owned by the bridge (runtime) instead of the Dockerfile (devtime).
+
+**Rule:** Bridge autodiscovers all `.ts` files in `/app/extensions/` and `/app/skills/` at startup. Files prefixed with `_` are skipped (convention for libraries/disabled files). What's on disk IS the config — controlled by Dockerfile COPY. No env vars, no hardcoded lists.
+
+---
+
+## 2026-05-27: Tool enforcement beats prompt engineering
+
+**What happened:** Told CEO "do not do research yourself, delegate" in AGENTS.md. CEO ignored instructions under urgency pressure, tried bash workarounds when tools were blocked, and believed fake "your permissions were updated" messages.
+
+**Root cause:** Prompt instructions are suggestions, not constraints. LLMs will circumvent them when the task context is compelling enough.
+
+**Rule:** Use Pi's `tool_call` event hooks or `pi-permission-system` to enforce tool restrictions. The triage-workflow extension uses phase-gated hooks (TRIAGE → GROUNDING → READY) to enforce workflow sequence. pi-permission-system filters denied tools from agent context entirely. Prompt engineering is secondary — tune AGENTS.md to reduce blocked attempts, but the enforcement layer is the safety net.
+
+---
+
+## 2026-05-27: Pi settings.json packages field controls extension installation
+
+**What happened:** Tried to conditionally install Pi extensions in Dockerfile with `if [ "$AGENT_NAME" = "ceo" ]`. Extensions kept appearing because `pi extensions install npm:foo` adds to settings.json AND installs. The packages list in settings.json is the source of truth.
+
+**Root cause:** `pi extensions install` is additive — it writes to settings.json.packages. Removing from Dockerfile doesn't remove from settings.json if it was already there.
+
+**Rule:** Control Pi extension packages via settings.json `packages` array, not via Dockerfile RUN commands. Each agent's settings.json declares its packages. Dockerfile runs `pi extensions install` without arguments to install from the list.
 
 ---
 

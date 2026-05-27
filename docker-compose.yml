@@ -1,9 +1,10 @@
 name: paperclip-eval
 
+x-agent-build: &agent-build
+  context: src/agents
+  dockerfile: Dockerfile
+
 x-agent: &agent
-  build:
-    context: src/agents
-    dockerfile: Dockerfile
   restart: unless-stopped
   env_file: .env
   deploy:
@@ -49,10 +50,8 @@ services:
   ceo:
     <<: *agent
     build:
-      context: src/agents
-      dockerfile: Dockerfile
-      args:
-        AGENT_NAME: ceo
+      <<: *agent-build
+      target: ceo
     ports:
       - "8081:8080"
     env_file:
@@ -70,8 +69,8 @@ services:
   researcher:
     <<: *agent
     build:
-      context: src/agents
-      dockerfile: researcher/Dockerfile
+      <<: *agent-build
+      target: researcher
     ports:
       - "8082:8080"
     env_file:
@@ -90,8 +89,8 @@ services:
   data:
     <<: *agent
     build:
-      context: src/agents
-      dockerfile: data/Dockerfile
+      <<: *agent-build
+      target: data
     ports:
       - "8083:8080"
     env_file:
@@ -115,8 +114,8 @@ services:
   writer:
     <<: *agent
     build:
-      context: src/agents
-      dockerfile: writer/Dockerfile
+      <<: *agent-build
+      target: writer
     ports:
       - "8084:8080"
     env_file:

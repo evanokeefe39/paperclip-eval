@@ -32,21 +32,84 @@ Before tackling M1 (full social media trend analysis across 5+ platforms), valid
 
 ### Success criteria
 
-- [ ] CEO creates sub-issues and delegates without manual intervention
-- [ ] Researcher completes Instagram and TikTok research via Paperclip tools
+- [x] CEO creates sub-issues and delegates without manual intervention
+- [x] Researcher completes Instagram and TikTok research via Paperclip tools
 - [ ] Writer synthesizes final report from Researcher output
-- [ ] All status transitions happen through Paperclip (checkout → in_progress → done)
-- [ ] Agents follow Paperclip skill conventions (heartbeat procedure, comments, status updates)
+- [x] All status transitions happen through Paperclip (checkout → in_progress → done)
+- [x] Agents follow Paperclip skill conventions (heartbeat procedure, comments, status updates)
 
-### Blockers found during execution
+### Blockers resolved during execution
 
 - Paperclip hostname rejection for Docker-internal requests (`tasks/issues/paperclip-hostname-rejection.md`) — workaround applied
-- `wakeOnDemand` not auto-invoking agents on issue assignment (`tasks/issues/wake-on-demand-not-triggering.md`) — under investigation
-- Paperclip skills not yet injected into HTTP adapter agents — in progress (bridge.mjs skill loading added)
+- `wakeOnDemand` not auto-invoking agents on issue assignment (`tasks/issues/wake-on-demand-not-triggering.md`) — heartbeat polling used instead
+- Paperclip skills not yet injected into HTTP adapter agents — bridge.mjs skill loading added
+- HTTP adapter payload mismatch — bridge was reading wrong fields, fixed to read `body.context`
+- CEO had work tools loaded — removed, now coordination-only
+
+### Issues observed
+
+These are agent behavior and subsystem wiring issues, not platform issues. The platform proof-of-concept succeeded.
+
+1. **CEO doing work instead of delegating** — even after removing work tools, CEO sometimes attempted research directly rather than decomposing and assigning to specialists
+2. **Researcher not writing structured findings** — Researcher did web research but didn't persist results using the findings/workproduct system, leaving output only in Paperclip issue comments
+3. **Writer couldn't produce report** — without structured findings artifacts to consume, Writer had no usable input and couldn't synthesize a proper deliverable
+
+These issues are addressed in M0.1.
 
 ### Status
 
-In progress. CEO has created EVA-1 (parent) with sub-issues EVA-2 (IG research), EVA-3 (TikTok research), EVA-4 (report synthesis). Agents registered, API key auth working. Skills injection in progress.
+Complete (with caveats). 2026-05-27. Platform orchestration validated — agents register, receive tasks, heartbeat, delegate, and transition status through Paperclip. Writer synthesis failed due to upstream findings format issues. See M0.1 for the subsystem-wiring follow-up.
+
+---
+
+## M0.1: Faceless Channel Analysis (Subsystems Wired)
+
+### What
+
+Same brief as M0 — faceless Instagram and TikTok channel analysis. But this time every subsystem is wired correctly: structured logging, standardized workproducts, proper artifact storage, permissions without the BRIDGE_EXTENSIONS hack, and full observability. The analysis should complete end-to-end with no manual intervention beyond the initial issue.
+
+### Why
+
+M0 proved the platform works. M0.1 proves the agents work as a system. The gap between "agents can talk to Paperclip" and "agents produce useful output" is subsystem integration: logging so we can debug, findings so researchers produce consumable output, artifacts so work products flow between agents, permissions so each agent has exactly the tools it needs.
+
+### What changed since M0
+
+- BRIDGE_EXTENSIONS env var replaced with 2-layer permissions model (agent config + bridge defaults)
+- Findings extension writes ADMIRALTY-graded structured findings via workproduct system
+- Logging extension emits structured logs to Aspire Dashboard via OTel
+- Artifacts written to shared volume with standardized paths and metadata
+
+### Scope
+
+Same as M0:
+- 10-15 faceless Instagram accounts across niches
+- 10-15 faceless TikTok accounts across similar niches
+- Per account: follower count, posting frequency, content format, engagement patterns
+- Cross-platform comparison and top 5 actionable insights
+
+### Success criteria
+
+- [ ] CEO delegates all research work — zero direct work execution by CEO
+- [ ] Researcher writes structured findings using workproduct/findings system (ADMIRALTY-graded, JSONL-persisted)
+- [ ] Writer reads Researcher findings from artifacts and synthesizes report
+- [ ] Final report delivered as artifact with cross-platform comparison and actionable insights
+- [ ] All agents produce structured logs visible in Aspire Dashboard
+- [ ] Permissions use 2-layer model — no BRIDGE_EXTENSIONS env var
+- [ ] Workproducts follow standardized format (ULID, session ID, validated fields)
+- [ ] Artifacts stored at standardized paths under `/artifacts/{agent}/`
+- [ ] Full agent turn traces visible in Aspire Dashboard (LLM calls, tool executions, timing)
+- [ ] No manual intervention beyond initial issue creation
+
+### Prerequisites
+
+- Logging extension operational (OTel → Aspire)
+- Findings extension writes valid workproducts
+- 2-layer permissions deployed (commit 85d6249)
+- Agent prompts updated to enforce delegation (CEO) and findings output (Researcher)
+
+### Status
+
+Not started. Blocked on verifying all subsystems are individually functional before running the full brief.
 
 ---
 

@@ -18,7 +18,7 @@ src/agents/
   bootstrap-invite.cjs      DB-level bootstrap invite creator (idempotent, bypasses CLI)
   paperclip-config.json     Config template for Paperclip CLI compatibility
   .dockerignore             Excludes .env and non-build files from image context
-  extensions/               Pi extensions loaded into all agent containers
+  extensions/               Pi extensions — selectively copied per agent by Dockerfile
     web-search.ts           Exa-backed web search tool (registered as web_search)
     web-fetch.ts            URL fetch tool with Jina Reader fallback (registered as web_fetch)
     web-scrape.ts           Web scraping tool
@@ -54,7 +54,7 @@ src/agents/
       validate.ts           Runtime validators for LLM structured output
       utils.ts              Shared helpers (sleep, stripHtml)
   skills/                   Paperclip platform tools and behavioral skills
-    client.ts               Shared Paperclip API client — session-cookie auth with caching
+    _client.ts              Shared Paperclip API client — underscore prefix = skipped by autodiscovery
     paperclip-tools.ts      Pi extension registering all 40 Paperclip MCP tools
     paperclip-skills/       Behavioral skills fetched from Paperclip repo (gitignored)
       paperclip/            Core heartbeat protocol, API reference, coordination
@@ -65,7 +65,8 @@ src/agents/
     .pi/agent/config.yml
     .pi/agent/models.json
     .pi/agent/auth.json     Provider auth (gitignored, symlink to root auth.json)
-    .pi/agent/AGENTS.md     Project instructions loaded by Pi at startup
+    .pi/agent/pi-permissions.jsonc  Tool access control (allow/deny per tool, pi-permission-system)
+    .pi/agent/settings.json Packages, model defaults, otel config
   researcher/               Researcher agent config and prompt
     (same structure as ceo/)
   coder/                    Coder agent config and prompt
@@ -123,9 +124,9 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 
 - HTTP adapter agents don't receive Paperclip's built-in MCP tools — those are only injected for local adapters (claude_local, codex_local, pi_local)
 - `src/agents/skills/paperclip-tools.ts` is a Pi extension that re-implements all 40 Paperclip MCP tools as Pi-native tools wrapping the REST API
-- Shared client at `src/agents/skills/client.ts` uses per-agent API key auth (`Authorization: Bearer <PAPERCLIP_API_KEY>`)
+- Shared client at `src/agents/skills/_client.ts` uses per-agent API key auth (`Authorization: Bearer <PAPERCLIP_API_KEY>`)
 - Tools cover: issues (CRUD, checkout, release), comments, documents, projects, goals, agents/inbox, interactions (suggest_tasks, ask_user_questions, request_confirmation), approvals (full lifecycle), workspace runtime, and an escape-hatch `paperclip_api_request` for anything not covered
-- Loaded in bridge.mjs via `-e /app/skills/paperclip-tools.ts`, copied into container by Dockerfile
+- Autodiscovered by bridge.mjs from `/app/skills/paperclip-tools.ts`, copied into container by Dockerfile
 - Requires env vars: `PAPERCLIP_API_URL`, `PAPERCLIP_API_KEY`, `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID` (all in per-agent `.env`)
 - If PAPERCLIP_API_URL or PAPERCLIP_API_KEY is missing, the extension silently skips registration (no crash)
 - API paths match the upstream MCP server at `packages/mcp-server/src/tools.ts` — all paths relative to `/api`
@@ -146,7 +147,7 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 ## Agent web tools
 
 - Pi has no built-in web search — custom extensions at `src/agents/extensions/` provide `web_search` (Exa API) and `web_fetch` (direct + Jina Reader fallback)
-- Extensions loaded via `-e` flags in bridge.mjs spawn args, copied into container at `/app/extensions/`
+- Extensions autodiscovered from `/app/extensions/` at bridge startup, passed via `-e` flags to Pi
 - Requires `EXA_API_KEY` env var in `.env`
 - DeepSeek handles tool calling reliably; Groq is flaky with function calls — avoid for agentic web search tasks
 - Test extensions locally via bash: `pi --mode json -e extensions/web-search.ts -p "query"` (PowerShell cannot capture Pi stdout)
@@ -160,7 +161,7 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - Paperclip's built-in interaction API covers structured HITL: `ask_user_questions` (forced-choice only, no free text), `request_confirmation` (accept/reject with optional reason), `suggest_tasks` (all-or-nothing accept)
 - Plugin config via `POST /api/plugins/{id}/config` — requires Discord bot token (stored as Paperclip secret), channel ID, guild ID
 - Sibling plugins exist for Telegram (`paperclip-plugin-telegram`) and Slack (`paperclip-plugin-slack`) using shared `PlatformAdapter` from `paperclip-plugin-chat-core`
-- Custom `escalate.ts` disabled in bridge.mjs but file retained for potential future fork/extension
+- `escalate.ts` extension provides local Paperclip-native escalation (issue + interaction); Discord plugin is the preferred channel when configured
 - Setup spec: `tasks/specs/discord-plugin-setup.md`
 
 ## Agent web scraping
@@ -184,8 +185,30 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - CEO uses shared `src/agents/Dockerfile` with AGENT_NAME build arg
 - Researcher uses `src/agents/researcher/Dockerfile` (lightweight bespoke: Python + scrapling + cheerio)
 - Data uses `src/agents/data/Dockerfile` (heavy bespoke: Python + scrapling[fetchers] + Chromium)
-- Bespoke Dockerfiles don't use AGENT_NAME arg — paths are hardcoded
+- Writer uses `src/agents/writer/Dockerfile` (Vale linter + style extensions)
+- Each Dockerfile selectively COPYs only the extensions that agent needs (universal base + role-specific). Bridge autodiscovers whatever is on disk.
+- Universal extensions (every agent): artifacts.ts, logging.ts, escalate.ts, types/, paperclip-tools.ts
 - Agent-specific scripts go in `src/agents/{agent}/scripts/`, copied to `/app/scripts/` in container
+
+## Agent permissions (pi-permission-system)
+
+- Every agent has `pi-permission-system` npm package installed via settings.json
+- Per-agent `pi-permissions.jsonc` in `.pi/agent/` controls tool access with allow/deny rules and wildcard patterns
+- Denied tools are filtered from agent context before startup — LLM never sees them
+- Two-layer access control: Dockerfile COPY (coarse — what's on disk) + pi-permissions.jsonc (fine — what LLM sees within loaded extensions)
+- CEO: read-only coordinator. Denied: bash, write, edit, checkout, upsert_document, api_request. Allowed: read, grep, find, ls, web_search, triage_task, create_issue, invoke_agent, escalate
+- Executor agents (researcher, data, writer): full file access (bash, read, write, edit). Denied: create_issue, invoke_agent, api_request (coordination tools reserved for CEO)
+- Review logs written to JSONL by pi-permission-system for auditing blocked attempts
+
+## CEO triage workflow
+
+- `triage-workflow.ts` extension provides phase-gated workflow for CEO only (self-gates on AGENT_NAME=ceo)
+- Three phases enforced by tool_call hooks: TRIAGE → GROUNDING → READY
+- TRIAGE: CEO must call `triage_task` before any delegation. Classifies complexity, suggests searches and agents.
+- GROUNDING: web_search unlocked (max 2 queries for domain context), escalate/ask_user_questions available for clarification
+- READY: `advance_to_delegation` unlocks create_issue, invoke_agent, add_comment for delegation
+- CEO cannot skip phases — hooks block tools not allowed in current phase
+- Audit log at `/artifacts/ceo/triage.log.jsonl` tracks phase transitions and blocked attempts
 
 ## Observability (OTel + Aspire Dashboard)
 
@@ -219,10 +242,11 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 ## Working with the bridge
 
 - bridge.mjs is a starting point, not production code — no auth, no streaming, no retry
-- Environment variables: `BRIDGE_PORT`, `PI_PROVIDER`, `PI_MODEL`, `BRIDGE_EXTENSIONS` (comma-separated extension paths), plus provider API keys
-- `BRIDGE_EXTENSIONS` overrides default extension list. CEO uses minimal set (paperclip-tools, artifacts, logging, escalate) — no work tools
+- Environment variables: `BRIDGE_PORT`, `PI_PROVIDER`, `PI_MODEL`, `BRIDGE_TIMEOUT_MS`, plus provider API keys
+- Extension loading: bridge autodiscovers all `.ts` files in `/app/extensions/` and `/app/skills/` at startup. Files prefixed with `_` are skipped. No hardcoded list.
+- Which extensions are on disk is controlled by Dockerfile COPY (devtime decision). Which tools the LLM can see is controlled by `pi-permissions.jsonc` (runtime enforcement).
 - HTTP adapter sends `{ agentId, runId, context }` — bridge builds prompt from `context.paperclipTaskMarkdown`, NOT from `body.prompt`/`body.env`
-- Each agent gets its own container instance from the same image
+- Each agent gets its own container instance
 - Workspace mounted at `/workspace` inside containers
 
 ## Known issues
