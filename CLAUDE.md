@@ -21,26 +21,44 @@ src/agents/
   paperclip-config.json     Config template for Paperclip CLI compatibility
   rbac.json                 Per-agent artifact access control rules
   .dockerignore             Excludes .env and non-build files from image context
-  extensions/               Pi extensions — selectively copied per agent by Dockerfile
+  extensions/               Pi extensions — discovered natively by Pi from ~/.pi/agent/extensions/
     web-search.ts           Exa-backed web search tool (registered as web_search)
     web-fetch.ts            URL fetch tool with Jina Reader fallback (registered as web_fetch)
-    web-scrape.ts           Web scraping tool
+    web-scrape/             Multi-tier web scraping (index.ts entry point)
+      index.ts              Extension entry point — probes deps, registers tier tools
+      types.ts              Shared interfaces (ChallengeResult, ParseResult, ScrapeData, FetchResult)
+      deps.ts               Dependency detection (hasPython, hasCheerio, hasScrapling*)
+      challenge.ts          Challenge page detection (Cloudflare, DataDome, PerimeterX, AWS WAF)
+      cheerio.ts            Shared cheerio parse layer (extractWithCheerio)
+      format.ts             Result formatting (formatScrapeResult, buildDiagnostics)
+      schemas.ts            Shared TypeBox parameter schemas (pagination, extract_fields)
+      rate-limiter.ts       Token bucket rate limiter for APIs
+      python-fetch.ts       Python subprocess fetch helper
+      tier-static.ts        T1: Node fetch + cheerio
+      tier-stealth.ts       T2: Python scrapling Fetcher + cheerio
+      tier-browser.ts       T3: Python scrapling DynamicFetcher + cheerio
+      tier-apify.ts         T4: Apify actor tools (scrape_apify, list_actors, apify_save_dataset, scrape_status)
+      tier-video.ts         T5: Video/audio (transcribe_audio, analyze_video, enrich_video)
     escalate.ts             Human escalation via Paperclip issues
     artifact-client.ts      Shared HTTP client for artifact service
     artifacts.ts            Artifact tools (write/read/list via artifact-client.ts)
-    logging.ts              OTel-backed logging (uses logging/ subdir, pi-otel + Aspire Dashboard)
-    logging/                Submodules for logging extension
+    paperclip/              Paperclip platform tools (index.ts entry point)
+      _client.ts            Shared Paperclip API client (request, resolveCompanyId, etc.)
+      index.ts              Pi extension registering all 40 Paperclip MCP tools
+    logging/                OTel-backed logging (index.ts entry point)
+      index.ts              Extension entry point — log_event, get_log, get_trace_id tools
       types.ts              LogEntry, LogLevel types
       buffer.ts             Ring buffer for in-memory log queries
       jsonl.ts              JSONL log writer (via artifact-client.ts to logs bucket)
       otel.ts               pi-otel event bus integration (structured logs to Aspire)
-    findings.ts             Structured findings with ADMIRALTY grading (via artifact-client.ts)
     triage-workflow.ts      CEO triage gate — web grounding + routing before delegation
-    workproduct/            Shared primitives for standardized work products
+    workproduct/            Standardized work products (index.ts entry point)
+      index.ts              Extension entry point — record_finding, add_source, query_findings, get_finding tools
       ulid.ts               Monotonic ULID generator (Crockford Base32, no deps)
       validate.ts           Two-level required/encouraged field validation framework
-    deep-research.ts        Multi-iteration research tool (uses deep-research/ subdir)
-    deep-research/          Engine, prompts, cache, types, validators, concurrency for deep research
+      templates/            Standardized agent input/output templates (briefs, outputs, workspace, meta)
+    deep-research/          Multi-iteration research (index.ts entry point)
+      index.ts              Extension entry point — deep_research, research_query, research_enrich tools
       config.ts             Named constants (caps, concurrency limits, content thresholds)
       types.ts              Shared TypeScript types
       prompts.ts            LLM prompt templates
@@ -56,9 +74,22 @@ src/agents/
       semaphore.ts          Counting semaphore for bounding concurrent async work
       validate.ts           Runtime validators for LLM structured output
       utils.ts              Shared helpers (sleep, stripHtml)
-  skills/                   Paperclip platform tools and behavioral skills
-    _client.ts              Shared Paperclip API client — underscore prefix = skipped by autodiscovery
-    paperclip-tools.ts      Pi extension registering all 40 Paperclip MCP tools
+    duckdb/                 DuckDB analytics (index.ts entry point)
+      index.ts              Extension entry point — duckdb_query, duckdb_read_file, duckdb_attach, duckdb_convert
+      connection.ts         DuckDB connection management
+      session.ts            Session state persistence (attach history)
+      format.ts             Query result formatting (table, json, csv)
+      detect.ts             File format detection and read function mapping
+      safety.ts             Query safety checks and natural language detection
+      nlq.ts                Natural language to SQL schema context
+    writing-style/          Writer style tools (index.ts entry point)
+      index.ts              Extension entry point — registers lint + profile tools
+      lint.ts               Vale linter integration + style analysis tools
+      metrics.ts            Readability and style metrics (shared utility, no tool registration)
+      profile.ts            Style profiling and comparison tools
+      vale/                 Vale config and custom style rules
+    types/                  Shared type declarations
+  skills/                   Behavioral skills (SKILL.md files, loaded via --skill)
     paperclip-skills/       Behavioral skills fetched from Paperclip repo (gitignored)
       paperclip/            Core heartbeat protocol, API reference, coordination
       paperclip-converting-plans-to-tasks/  Plan-to-issue decomposition
@@ -130,10 +161,10 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 ## Paperclip skills (platform tools)
 
 - HTTP adapter agents don't receive Paperclip's built-in MCP tools — those are only injected for local adapters (claude_local, codex_local, pi_local)
-- `src/agents/skills/paperclip-tools.ts` is a Pi extension that re-implements all 40 Paperclip MCP tools as Pi-native tools wrapping the REST API
-- Shared client at `src/agents/skills/_client.ts` uses per-agent API key auth (`Authorization: Bearer <PAPERCLIP_API_KEY>`)
+- `src/agents/extensions/paperclip/index.ts` is a Pi extension that re-implements all 40 Paperclip MCP tools as Pi-native tools wrapping the REST API
+- Shared client at `src/agents/extensions/paperclip/_client.ts` uses per-agent API key auth (`Authorization: Bearer <PAPERCLIP_API_KEY>`)
 - Tools cover: issues (CRUD, checkout, release), comments, documents, projects, goals, agents/inbox, interactions (suggest_tasks, ask_user_questions, request_confirmation), approvals (full lifecycle), workspace runtime, and an escape-hatch `paperclip_api_request` for anything not covered
-- Autodiscovered by bridge.mjs from `/app/skills/paperclip-tools.ts`, copied into container by Dockerfile
+- Discovered by Pi natively from `/root/.pi/agent/extensions/paperclip/index.ts`
 - Requires env vars: `PAPERCLIP_API_URL`, `PAPERCLIP_API_KEY`, `PAPERCLIP_AGENT_ID`, `PAPERCLIP_COMPANY_ID` (all in per-agent `.env`)
 - If PAPERCLIP_API_URL or PAPERCLIP_API_KEY is missing, the extension silently skips registration (no crash)
 - API paths match the upstream MCP server at `packages/mcp-server/src/tools.ts` — all paths relative to `/api`
@@ -154,7 +185,7 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 ## Agent web tools
 
 - Pi has no built-in web search — custom extensions at `src/agents/extensions/` provide `web_search` (Exa API) and `web_fetch` (direct + Jina Reader fallback)
-- Extensions autodiscovered from `/app/extensions/` at bridge startup, passed via `-e` flags to Pi
+- Extensions discovered by Pi natively from `~/.pi/agent/extensions/` (supports `*.ts` and `*/index.ts`)
 - Requires `EXA_API_KEY` env var in `.env`
 - DeepSeek handles tool calling reliably; Groq is flaky with function calls — avoid for agentic web search tasks
 - Test extensions locally via bash: `pi --mode json -e extensions/web-search.ts -p "query"` (PowerShell cannot capture Pi stdout)
@@ -177,7 +208,7 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - Architecture: fetch decoupled from parse. Python scripts return raw HTML. Cheerio handles all extraction (one parser for T1/T2/T3). T4 bypasses parse (Apify returns structured data).
 - Challenge detection between fetch and parse: identifies Cloudflare, DataDome, PerimeterX, AWS WAF
 - Diagnostic output on zero items: HTTP status, HTML length, challenge vendor, selector match count, page title
-- Extension: `src/agents/extensions/web-scrape.ts` — conditionally registers tools based on available deps
+- Extension: `src/agents/extensions/web-scrape/` — subdirectory with index.ts entry point, conditionally registers tools based on available deps
 - Python fetch-only scripts: `scripts/scrape_stealth.py` (researcher + data), `scripts/scrape_browser.py` (data only). Input: `{url, wait_for?}`. Output: `{html, status_code, url, duration_ms, errors}`.
 - Tool registration: cheerio -> T1, scrapling Fetcher + cheerio -> T2, `.browsers-installed` marker + cheerio -> T3, Apify -> always
 - Researcher image: lightweight (Python + scrapling Fetcher + cheerio, ~600MB)
@@ -193,8 +224,8 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - Researcher uses `src/agents/researcher/Dockerfile` (lightweight bespoke: Python + scrapling + cheerio)
 - Data uses `src/agents/data/Dockerfile` (heavy bespoke: Python + scrapling[fetchers] + Chromium)
 - Writer uses `src/agents/writer/Dockerfile` (Vale linter + style extensions)
-- Each Dockerfile selectively COPYs only the extensions that agent needs (universal base + role-specific). Bridge autodiscovers whatever is on disk.
-- Universal extensions (every agent): artifacts.ts, logging.ts, escalate.ts, types/, paperclip-tools.ts
+- All extensions COPY'd to `/root/.pi/agent/extensions/` in base stage. Pi discovers natively (*.ts and */index.ts).
+- Universal extensions (every agent): artifacts.ts, logging/, escalate.ts, types/, paperclip/
 - Agent-specific scripts go in `src/agents/{agent}/scripts/`, copied to `/app/scripts/` in container
 
 ## Agent permissions (pi-permission-system)
@@ -224,7 +255,7 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - pi-otel exports via OTLP gRPC to `dashboard:18889`
 - Each agent's `.pi/agent/settings.json` has `otel` config with per-agent `serviceName`
 - Span hierarchy: `pi.interaction` → `pi.turn` → `pi.llm_request` / `pi.tool.<name>`
-- logging.ts extension emits structured logs to dashboard via `pi.events.emit("pi-otel:log", ...)`
+- logging/ extension emits structured logs to dashboard via `pi.events.emit("pi-otel:log", ...)`
 - logging.ts also writes JSONL to `/artifacts/{agent}/run.log.jsonl` and maintains in-memory ring buffer
 - Tools: `log_event` (structured logging), `get_log` (query buffer), `get_trace_id` (cross-agent correlation)
 - Bridge generates W3C TRACEPARENT per /invoke request, propagates to Pi process
@@ -257,7 +288,7 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - Environment variables: `BRIDGE_PORT`, `PI_PROVIDER`, `PI_MODEL`, `BRIDGE_TIMEOUT_MS`, plus provider API keys
 - Infrastructure env vars in root `.env`: `POSTGRES_PASSWORD`, `ARTIFACT_DB_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`
 - `ARTIFACT_SERVICE_URL` set per-agent in both docker-compose environment and agent `.env` files (defaults to `http://artifact-service:8090`)
-- Extension loading: bridge autodiscovers all `.ts` files in `/app/extensions/` and `/app/skills/` at startup. Files prefixed with `_` are skipped. No hardcoded list.
+- Extension loading: Pi discovers extensions natively from `/root/.pi/agent/extensions/` at startup. Supports flat `*.ts` files and `*/index.ts` subdirectories. Bridge no longer does extension discovery or passes `-e` flags.
 - Which extensions are on disk is controlled by Dockerfile COPY (devtime decision). Which tools the LLM can see is controlled by `pi-permissions.jsonc` (runtime enforcement).
 - HTTP adapter sends `{ agentId, runId, context }` — bridge builds prompt from `context.paperclipTaskMarkdown`, NOT from `body.prompt`/`body.env`
 - Each agent gets its own container instance

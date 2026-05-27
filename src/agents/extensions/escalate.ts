@@ -5,7 +5,7 @@ import {
   resolveCompanyId,
   resolveAgentId,
   isConfigured,
-} from "../skills/_client.js";
+} from "./paperclip/_client.js";
 
 // ---------------------------------------------------------------------------
 // Types

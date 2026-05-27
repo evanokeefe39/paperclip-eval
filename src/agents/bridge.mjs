@@ -1,7 +1,7 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readdirSync } from "node:fs";
+
 
 // --- Configuration ---
 
@@ -53,25 +53,8 @@ async function reportCostEvent(usage) {
   }
 }
 
-// --- Extension autodiscovery ---
-
-function discoverExtensions() {
-  const dirs = ["/app/extensions", "/app/skills"];
-  const extensions = [];
-  for (const dir of dirs) {
-    try {
-      for (const f of readdirSync(dir)) {
-        if (f.endsWith(".ts") && !f.startsWith("_")) {
-          extensions.push(`${dir}/${f}`);
-        }
-      }
-    } catch {}
-  }
-  return extensions;
-}
-
-const discoveredExtensions = discoverExtensions();
-log("info", "extensions_discovered", { count: discoveredExtensions.length, paths: discoveredExtensions });
+// Extensions discovered via Pi-native autodiscovery from ~/.pi/agent/extensions/
+// No bridge-side discovery needed — Pi scans *.ts and */index.ts at startup
 
 // --- Paperclip skill discovery ---
 
@@ -211,14 +194,11 @@ const server = http.createServer(async (req, res) => {
 
   const skillArgs = PAPERCLIP_SKILLS.flatMap(name => ["--skill", `${SKILLS_DIR}/${name}`]);
 
-  const extensionArgs = discoveredExtensions.flatMap(path => ["-e", path]);
-
   const spawnArgs = [
     "--mode", "rpc",
     "--no-session",
     "--provider", PI_PROVIDER,
     "--model", PI_MODEL,
-    ...extensionArgs,
     ...skillArgs,
     ...(systemPrompt ? ["--append-system-prompt", systemPrompt] : []),
   ];

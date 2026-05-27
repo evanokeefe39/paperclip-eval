@@ -7,8 +7,8 @@ RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 ENV NODE_PATH=/usr/local/lib/node_modules
 WORKDIR /app
 COPY bridge.mjs .
-COPY extensions/ /app/extensions/
-COPY skills/ /app/skills/
+COPY extensions/ /root/.pi/agent/extensions/
+COPY skills/paperclip-skills/ /app/skills/paperclip-skills/
 RUN pi extensions install || true
 RUN mkdir -p /workspace
 EXPOSE 8080
@@ -21,19 +21,15 @@ CMD ["node", "bridge.mjs"]
 # ============================================================
 FROM base AS ceo
 COPY ceo/.pi/agent/ /root/.pi/agent/
-COPY templates/ /app/templates/
 
 FROM base AS coder
 COPY coder/.pi/agent/ /root/.pi/agent/
-COPY templates/ /app/templates/
 
 FROM base AS qa
 COPY qa/.pi/agent/ /root/.pi/agent/
-COPY templates/ /app/templates/
 
 FROM base AS publisher
 COPY publisher/.pi/agent/ /root/.pi/agent/
-COPY templates/ /app/templates/
 
 # ============================================================
 # RESEARCHER — lightweight scraping (Python + Scrapling + Cheerio)
@@ -76,4 +72,3 @@ RUN curl -sfL --retry 3 --retry-delay 2 -o /tmp/vale.tar.gz \
 FROM writer-deps AS writer
 COPY writer/.pi/agent/ /root/.pi/agent/
 COPY data/style/ /app/data/style/
-COPY vale/ /app/vale/
