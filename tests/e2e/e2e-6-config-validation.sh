@@ -225,4 +225,81 @@ else
     fail "Researcher reportsTo='$RES_REPORTS', expected='$CEO_NAME'"
 fi
 
+# --- Validate heartbeat uses intervalSec (not intervalMs) ---
+ALL_AGENTS=("ceo" "researcher" "data" "writer" "coder" "qa" "publisher")
+for agent in "${ALL_AGENTS[@]}"; do
+    AGENT_JSON="$AGENTS_DIR/$agent/agent.json"
+    [ ! -f "$AGENT_JSON" ] && continue
+
+    begin_test "$agent/agent.json heartbeat uses intervalSec (not intervalMs)"
+    HAS_MS=$(jq -r '.runtimeConfig.heartbeat.intervalMs // empty' "$AGENT_JSON")
+    HAS_SEC=$(jq -r '.runtimeConfig.heartbeat.intervalSec // empty' "$AGENT_JSON")
+    if [ -n "$HAS_MS" ]; then
+        fail "uses intervalMs ($HAS_MS) — Paperclip reads intervalSec, intervalMs silently ignored"
+    elif [ -z "$HAS_SEC" ]; then
+        fail "intervalSec not set — heartbeat will default to 0 (disabled)"
+    else
+        pass
+    fi
+
+    begin_test "$agent/agent.json intervalSec is positive integer"
+    if [ -n "$HAS_SEC" ] && [ "$HAS_SEC" -gt 0 ] 2>/dev/null; then
+        pass
+    else
+        fail "intervalSec='$HAS_SEC' — must be positive integer (seconds)"
+    fi
+done
+
+# --- Validate CEO has restricted extensions in docker-compose ---
+begin_test "docker-compose CEO service has BRIDGE_EXTENSIONS override"
+COMPOSE="$REPO_ROOT/docker-compose.yml"
+if grep -A 20 "^  ceo:" "$COMPOSE" | grep -q "BRIDGE_EXTENSIONS"; then
+    pass
+else
+    fail "CEO service missing BRIDGE_EXTENSIONS — will load all work tools"
+fi
+
+begin_test "CEO BRIDGE_EXTENSIONS excludes work tools"
+CEO_EXT=$(grep -A 20 "^  ceo:" "$COMPOSE" | grep "BRIDGE_EXTENSIONS" | head -1)
+WORK_TOOLS_FOUND=""
+echo "$CEO_EXT" | grep -q "web-search" && WORK_TOOLS_FOUND="$WORK_TOOLS_FOUND web-search"
+echo "$CEO_EXT" | grep -q "web-fetch" && WORK_TOOLS_FOUND="$WORK_TOOLS_FOUND web-fetch"
+echo "$CEO_EXT" | grep -q "web-scrape" && WORK_TOOLS_FOUND="$WORK_TOOLS_FOUND web-scrape"
+echo "$CEO_EXT" | grep -q "duckdb" && WORK_TOOLS_FOUND="$WORK_TOOLS_FOUND duckdb"
+if [ -n "$WORK_TOOLS_FOUND" ]; then
+    fail "CEO has work tools:$WORK_TOOLS_FOUND"
+else
+    pass
+fi
+
+begin_test "CEO BRIDGE_EXTENSIONS includes coordination tools"
+MISSING_COORD=""
+echo "$CEO_EXT" | grep -q "paperclip-tools" || MISSING_COORD="$MISSING_COORD paperclip-tools"
+echo "$CEO_EXT" | grep -q "escalate" || MISSING_COORD="$MISSING_COORD escalate"
+if [ -n "$MISSING_COORD" ]; then
+    fail "CEO missing coordination tools:$MISSING_COORD"
+else
+    pass
+fi
+
+# --- Validate bridge reads body.context (not body.env) ---
+begin_test "bridge.mjs reads body.context for wake context"
+BRIDGE="$AGENTS_DIR/bridge.mjs"
+if grep -q "body\.context" "$BRIDGE" && ! grep -q "body\.env\." "$BRIDGE"; then
+    pass
+else
+    if grep -q "body\.env\." "$BRIDGE"; then
+        fail "bridge still reads body.env — HTTP adapter sends body.context"
+    else
+        fail "bridge does not read body.context"
+    fi
+fi
+
+begin_test "bridge.mjs builds prompt from paperclipTaskMarkdown"
+if grep -q "paperclipTaskMarkdown" "$BRIDGE"; then
+    pass
+else
+    fail "bridge does not use context.paperclipTaskMarkdown for prompt"
+fi
+
 summary

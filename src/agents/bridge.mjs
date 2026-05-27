@@ -151,36 +151,66 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ error: "invalid_json", detail: err.message }));
   }
 
-  const systemPrompt = body.systemPrompt || "";
-  const prompt = body.prompt || body.renderedPrompt || "Continue your work.";
+  // HTTP adapter sends { agentId, runId, context } — no prompt/systemPrompt/env
+  const ctx = body.context || {};
+  const runId = body.runId || null;
 
-  log("debug", "invoke_env_keys", { keys: body.env ? Object.keys(body.env) : [], runId: body.runId || body.id || null });
-
-  const runId = body.env?.PAPERCLIP_RUN_ID || body.runId || null;
   const wakeContext = {
-    reason: body.env?.PAPERCLIP_WAKE_REASON || "heartbeat",
-    taskId: body.env?.PAPERCLIP_TASK_ID || null,
-    commentId: body.env?.PAPERCLIP_WAKE_COMMENT_ID || null,
-    approvalId: body.env?.PAPERCLIP_APPROVAL_ID || null,
+    reason: ctx.wakeReason || "heartbeat",
+    source: ctx.wakeSource || null,
+    taskId: ctx.taskId || ctx.issueId || null,
+    commentId: ctx.wakeCommentId || null,
+    issueId: ctx.issueId || null,
+    interactionId: ctx.interactionId || null,
+    interactionKind: ctx.interactionKind || null,
     runId,
   };
   log("info", "wake_context", wakeContext);
 
+  // Build prompt from Paperclip's pre-rendered task markdown, fall back to wake payload
+  let prompt;
+  if (ctx.paperclipTaskMarkdown) {
+    prompt = ctx.paperclipTaskMarkdown;
+  } else if (ctx.paperclipWake) {
+    const wake = ctx.paperclipWake;
+    const parts = [];
+    if (wake.issue) parts.push(`Issue: ${wake.issue.identifier || wake.issue.id} — ${wake.issue.title}\n${wake.issue.description || ""}`);
+    if (wake.comments?.length) parts.push(`Latest comment:\n${wake.comments[wake.comments.length - 1].body}`);
+    prompt = parts.join("\n\n") || `Wake reason: ${wakeContext.reason}. Check your inbox.`;
+  } else if (ctx.paperclipIssue) {
+    prompt = `Issue: ${ctx.paperclipIssue.identifier || ctx.paperclipIssue.id} — ${ctx.paperclipIssue.title}\n${ctx.paperclipIssue.description || ""}`;
+  } else if (body.prompt || body.renderedPrompt) {
+    // Backward compat: direct bridge testing with {prompt: "..."} payload
+    prompt = body.prompt || body.renderedPrompt;
+  } else {
+    prompt = `Wake reason: ${wakeContext.reason}. Check your inbox for assigned work.`;
+  }
+
+  const systemPrompt = "";
+
   const skillArgs = PAPERCLIP_SKILLS.flatMap(name => ["--skill", `${SKILLS_DIR}/${name}`]);
+
+  const DEFAULT_EXTENSIONS = [
+    "/app/extensions/web-search.ts",
+    "/app/extensions/web-fetch.ts",
+    "/app/extensions/escalate.ts",
+    "/app/extensions/web-scrape.ts",
+    "/app/skills/paperclip-tools.ts",
+    "/app/extensions/artifacts.ts",
+    "/app/extensions/logging.ts",
+    "/app/extensions/duckdb.ts",
+  ];
+  const extensions = process.env.BRIDGE_EXTENSIONS
+    ? process.env.BRIDGE_EXTENSIONS.split(",").map(s => s.trim()).filter(Boolean)
+    : DEFAULT_EXTENSIONS;
+  const extensionArgs = extensions.flatMap(path => ["-e", path]);
 
   const spawnArgs = [
     "--mode", "rpc",
     "--no-session",
     "--provider", PI_PROVIDER,
     "--model", PI_MODEL,
-    "-e", "/app/extensions/web-search.ts",
-    "-e", "/app/extensions/web-fetch.ts",
-    "-e", "/app/extensions/escalate.ts",
-    "-e", "/app/extensions/web-scrape.ts",
-    "-e", "/app/skills/paperclip-tools.ts",
-    "-e", "/app/extensions/artifacts.ts",
-    "-e", "/app/extensions/logging.ts",
-    "-e", "/app/extensions/duckdb.ts",
+    ...extensionArgs,
     ...skillArgs,
     ...(systemPrompt ? ["--append-system-prompt", systemPrompt] : []),
   ];
@@ -192,7 +222,7 @@ const server = http.createServer(async (req, res) => {
   try {
     pi = spawn("pi", spawnArgs, {
       cwd: body.workspace || "/workspace",
-      env: { ...process.env, ...body.env, TRACEPARENT: traceparent, ...(runId ? { PAPERCLIP_RUN_ID: runId } : {}) },
+      env: { ...process.env, TRACEPARENT: traceparent, ...(runId ? { PAPERCLIP_RUN_ID: runId } : {}) },
     });
   } catch (err) {
     metrics.requests_active--;

@@ -6,7 +6,7 @@ Open.
 
 ## Symptom
 
-After fresh setup with heartbeat enabled on all 4 running agents (CEO, Researcher, Data, Writer), only CEO receives automatic heartbeat invocations from Paperclip. Researcher, Writer, and Data are never invoked by the scheduler despite having `heartbeat.enabled: true, intervalMs: 120000` in their registered runtimeConfig.
+After fresh setup with heartbeat enabled on all 4 running agents (CEO, Researcher, Data, Writer), only CEO receives automatic heartbeat invocations from Paperclip. Researcher, Writer, and Data are never invoked by the scheduler despite having `heartbeat.enabled: true` in their registered runtimeConfig. Root cause: config used `intervalMs: 120000` but Paperclip reads `intervalSec`. Fixed to `intervalSec: 120`.
 
 Researcher and Writer were only invoked reactively when CEO created issues assigned to them (wakeOnDemand trigger from issue creation), not by the periodic heartbeat scheduler.
 

@@ -332,7 +332,7 @@ Every agent directory requires these files. No exceptions.
   "runtimeConfig": {
     "heartbeat": {
       "enabled": true,
-      "intervalMs": 120000,
+      "intervalSec": 120,
       "wakeOnDemand": true
     }
   }

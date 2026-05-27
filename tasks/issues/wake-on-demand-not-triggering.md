@@ -55,7 +55,7 @@ Step 9 says "prefer child issues over polling" and "rely on Paperclip wake event
 - No tool for CEO to explicitly invoke agents after delegation
 
 **Fixes applied:**
-1. All 7 agent.json files: `heartbeat.enabled: true, intervalMs: 120000` (2min poll + wakeOnDemand for events)
+1. All 7 agent.json files: `heartbeat.enabled: true, intervalSec: 120` (2min poll + wakeOnDemand for events). NOTE: field is `intervalSec` not `intervalMs` — Paperclip silently defaults to 0 if wrong field name used.
 2. `client.ts`: sends `X-Paperclip-Run-Id` header on non-GET requests when `PAPERCLIP_RUN_ID` env var is set
 3. `paperclip-tools.ts`: added `paperclip_invoke_agent` tool wrapping `POST /api/agents/{id}/heartbeat/invoke`
 4. `bridge.mjs`: added wake context logging (reason, taskId, commentId, approvalId, runId)

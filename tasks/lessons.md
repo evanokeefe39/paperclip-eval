@@ -4,6 +4,36 @@ Patterns and corrections from implementation cycles. Review before starting work
 
 ---
 
+## 2026-05-27: HTTP adapter payload is NOT local-adapter payload
+
+**What happened:** Bridge read `body.prompt`, `body.systemPrompt`, `body.env.PAPERCLIP_WAKE_REASON` — all undefined for HTTP adapter. Every agent got "Continue your work." as its prompt, losing all Paperclip-provided task context.
+
+**Root cause:** HTTP adapter sends `{ agentId, runId, context }`. Prompt assembly, skill injection, session management are all local-adapter responsibilities. HTTP adapter is a dumb pipe.
+
+**Rule:** When working with HTTP adapter, read `body.context` for everything. Build prompt from `context.paperclipTaskMarkdown`. Never assume `body.env` or `body.prompt` exist.
+
+---
+
+## 2026-05-27: Paperclip heartbeat field is intervalSec, not intervalMs
+
+**What happened:** All 7 agent.json files had `intervalMs: 120000`. Paperclip's `parseHeartbeatPolicy` reads `intervalSec`, defaults to 0 when absent. Heartbeat silently disabled for all agents despite `enabled: true`.
+
+**Root cause:** Field name mismatch. No validation error, no warning — just a silent default to 0.
+
+**Rule:** Paperclip heartbeat config uses `intervalSec` (seconds). Always verify field names against `parseHeartbeatPolicy` in `server/src/services/heartbeat.ts` when changing heartbeat config.
+
+---
+
+## 2026-05-27: CEO must not have work tools
+
+**What happened:** CEO had web-search, web-fetch, web-scrape, duckdb loaded. When given tasks, it did the work itself instead of delegating to specialist agents.
+
+**Root cause:** No Paperclip mechanism for tool-gating by role. Agent uses shortest path to "done" — if tools are available, it uses them.
+
+**Rule:** CEO gets coordination tools only (paperclip-tools, artifacts, logging, escalate). Use `BRIDGE_EXTENSIONS` env var to override. Remove work tools from any planner/coordinator agent.
+
+---
+
 ## 2026-05-26: wakeOnDemand does not replace heartbeat for work discovery
 
 **What happened:** All agents had `heartbeat.enabled: false, wakeOnDemand: true`. CEO created child issues assigned to workers. Workers never woke up. Multi-agent orchestration dead on arrival.

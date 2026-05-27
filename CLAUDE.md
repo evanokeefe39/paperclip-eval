@@ -213,7 +213,9 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 ## Working with the bridge
 
 - bridge.mjs is a starting point, not production code — no auth, no streaming, no retry
-- Environment variables: `BRIDGE_PORT`, `PI_PROVIDER`, `PI_MODEL`, plus provider API keys
+- Environment variables: `BRIDGE_PORT`, `PI_PROVIDER`, `PI_MODEL`, `BRIDGE_EXTENSIONS` (comma-separated extension paths), plus provider API keys
+- `BRIDGE_EXTENSIONS` overrides default extension list. CEO uses minimal set (paperclip-tools, artifacts, logging, escalate) — no work tools
+- HTTP adapter sends `{ agentId, runId, context }` — bridge builds prompt from `context.paperclipTaskMarkdown`, NOT from `body.prompt`/`body.env`
 - Each agent gets its own container instance from the same image
 - Workspace mounted at `/workspace` inside containers
 

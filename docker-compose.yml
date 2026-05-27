@@ -58,6 +58,8 @@ services:
     env_file:
       - .env
       - src/agents/ceo/.env
+    environment:
+      BRIDGE_EXTENSIONS: "/app/skills/paperclip-tools.ts,/app/extensions/artifacts.ts,/app/extensions/logging.ts,/app/extensions/escalate.ts"
     volumes:
       - ceo-workspace:/workspace
       - ./artifacts:/artifacts

@@ -24,7 +24,7 @@ Agents are registered via the Paperclip API with adapter type `http`. The adapte
   "runtimeConfig": {
     "heartbeat": {
       "enabled": true,
-      "intervalMs": 120000,
+      "intervalSec": 120,
       "wakeOnDemand": true
     }
   }

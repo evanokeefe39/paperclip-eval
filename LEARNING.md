@@ -4,6 +4,35 @@ Running notes on issues, workarounds, and architectural observations discovered 
 
 ---
 
+## Bridge payload structure was completely wrong (2026-05-27)
+
+### Problem
+Bridge assumed local-adapter payload shape: `body.prompt`, `body.systemPrompt`, `body.env.PAPERCLIP_WAKE_REASON`, etc. HTTP adapter actually sends `{ agentId, runId, context }` — no prompt, no systemPrompt, no env dict. Every agent invocation fell through to hardcoded "Continue your work." prompt, discarding all rich task context Paperclip provides (issue title, description, wake comments, workspace info).
+
+### Root cause
+HTTP adapter is a dumb pipe — it forwards context as-is. Prompt assembly is a local-adapter responsibility. Bridge was written assuming local-adapter conventions apply to HTTP adapter. They don't.
+
+### Fix
+Rewrote bridge.mjs payload parsing: reads `body.context.*` for wake metadata, builds prompt from `context.paperclipTaskMarkdown` (Paperclip's pre-rendered task markdown) with fallbacks to `context.paperclipWake` and `context.paperclipIssue`. Removed `body.env` spreading from Pi spawn env.
+
+### Key takeaway
+HTTP adapter payload structure is underdocumented. The SKILL.md and heartbeat docs assume local adapters. Always check the actual adapter source (`server/src/adapters/http/execute.ts`) when building HTTP bridges.
+
+---
+
+## CEO agent: strip work tools, enforce delegation (2026-05-27)
+
+### Problem
+CEO had all extensions loaded (web-search, web-fetch, web-scrape, duckdb, etc.) and would do research/writing work itself instead of delegating to specialist agents. Shortest path to "done" was using its own tools, not creating sub-issues.
+
+### Fix
+Added `BRIDGE_EXTENSIONS` env var to bridge.mjs for per-agent extension control. CEO docker-compose service overrides with minimal set: paperclip-tools (coordination), artifacts (read other agents' output), logging (observability), escalate (human HITL). No research, scraping, or data tools.
+
+### Key takeaway
+Paperclip has no built-in tool-gating per agent role. Without explicit extension stripping, agents will use whatever tools are available. Prompt discipline alone is insufficient — remove the tools entirely.
+
+---
+
 ## 2026-05-26 — wakeOnDemand does not trigger on issue assignment
 
 ### What happened
@@ -17,7 +46,7 @@ Paperclip uses a poll-plus-event hybrid model. Heartbeat polling is the primary 
 2. No tool existed for CEO to explicitly invoke another agent. Fixed: added `paperclip_invoke_agent` tool wrapping `POST /api/agents/{id}/heartbeat/invoke`.
 
 ### Fix
-1. Enabled heartbeat on all agents: `{ "enabled": true, "intervalMs": 120000, "wakeOnDemand": true }`. Heartbeat handles work discovery, wakeOnDemand handles reactive events.
+1. Enabled heartbeat on all agents: `{ "enabled": true, "intervalSec": 120, "wakeOnDemand": true }`. Heartbeat handles work discovery, wakeOnDemand handles reactive events. NOTE: Paperclip reads `intervalSec` (seconds), NOT `intervalMs`. Using `intervalMs` causes silent fallback to 0, disabling heartbeat entirely.
 2. Added `X-Paperclip-Run-Id` header to `client.ts` for mutating requests.
 3. Added `paperclip_invoke_agent` tool so CEO can explicitly invoke delegated agents (belt-and-suspenders).
 4. Added wake context logging in `bridge.mjs` for observability.

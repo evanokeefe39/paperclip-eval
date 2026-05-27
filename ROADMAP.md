@@ -497,6 +497,79 @@ Start with Stage 1 (DLT scripts). Build a Crunchbase pipeline as the first one. 
 
 ---
 
+## Planned: Repo layout reorg + per-agent extension loading
+
+Current state: everything under `src/agents/` — shared code (bridge, extensions, skills, data, vale) mixed with per-agent identity (config, prompts, auth). Docker build context is `src/agents/`, which forces all shared resources there. Extensions are hardcoded in bridge.mjs — every agent loads all 8, conditional registration silently no-ops for missing deps.
+
+### Target layout
+
+```
+src/
+  lib/                              # shared code + data, COPY'd into containers
+    bridge.mjs
+    extensions/                     # Pi extensions (TypeScript)
+    skills/                         # Paperclip platform tools + behavioral skills
+    data/                           # static config (style/, templates/)
+    vale/                           # Vale linter config + rules
+  agents/                           # per-agent identity (not code)
+    Dockerfile                      # shared base image
+    .dockerignore
+    ceo/
+    writer/
+      Dockerfile                    # bespoke (adds Vale)
+    researcher/
+      Dockerfile                    # bespoke (adds Python/scrapling)
+    data/
+      Dockerfile                    # bespoke (adds Chromium/duckdb)
+    qa/
+    coder/
+    publisher/
+  setup/
+    setup.sh
+    setup.ps1
+    bootstrap-invite.cjs
+    paperclip-config.json
+```
+
+Docker build context moves to `src/`. Dockerfiles COPY from `lib/` and `agents/{name}/`.
+
+### Per-agent extension mapping
+
+bridge.mjs reads extensions from agent.json (or env var) instead of hardcoded list.
+
+| Extension | CEO | Researcher | Data | Writer | QA | Coder |
+|---|---|---|---|---|---|---|
+| paperclip-tools | yes | yes | yes | yes | yes | yes |
+| artifacts | yes | yes | yes | yes | yes | yes |
+| logging | yes | yes | yes | yes | yes | yes |
+| escalate | yes | yes | yes | yes | yes | yes |
+| web-search | yes | yes | yes | - | - | - |
+| web-fetch | - | yes | yes | - | yes | - |
+| web-scrape | - | yes | yes | - | - | - |
+| deep-research | - | yes | yes | - | - | - |
+| duckdb | - | - | yes | - | - | - |
+| style-profile | - | - | - | yes | - | - |
+| style-lint | - | - | - | yes | - | - |
+
+Core 4 everywhere. Everything else role-specific. Coder handled separately (bash/curl/MCP tools).
+
+### Migration steps
+
+1. Create `src/lib/` and `src/setup/`, move files
+2. Add `extensions` array to each agent's agent.json
+3. Update bridge.mjs to read per-agent extension list
+4. Update all Dockerfiles (COPY paths, build context to `src/`)
+5. Update docker-compose.yml (context: `src/`)
+6. Update setup.sh paths
+7. Verify tests still pass
+
+### Blocked on
+
+- Not critical — current layout works, just messy
+- Should batch with Docker image size optimization (shared concern with Dockerfile changes)
+
+---
+
 ## Future considerations
 
 - Artifact metadata index (what was produced, by whom, when)
