@@ -1,0 +1,6 @@
+extends: existence
+message: "Em dash overuse — prefer commas, periods, or parentheses."
+level: warning
+ignorecase: false
+tokens:
+  - "—"

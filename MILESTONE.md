@@ -50,7 +50,49 @@ In progress. CEO has created EVA-1 (parent) with sub-issues EVA-2 (IG research),
 
 ---
 
-## M1: Social Media Trend Analysis for the Developer Space
+## M1: Artifact Store v2 (Bun Service + Postgres + MinIO)
+
+### What
+
+Replace the bind-mounted `./artifacts` directory and `.meta.json` sidecar files with a proper artifact store: Bun-based REST service, MinIO for blob storage, Postgres for metadata. Agents interact over HTTP — no direct filesystem, database, or S3 connections from extensions.
+
+### Why
+
+Every downstream milestone depends on reliable, structured artifact storage. The current v1 approach (shared Docker volume, sidecar JSON files, filesystem walks) doesn't scale to multi-agent workflows with RBAC, cross-agent discovery, or durable storage that survives stack teardown. This is the infrastructure gate for M2 and beyond.
+
+### Spec
+
+`tasks/specs/artifact-store-v2.md`
+
+### Scope
+
+- Postgres container (shared instance for Paperclip + artifact metadata)
+- MinIO container (S3-compatible blob storage)
+- Bun artifact service (`src/artifact-service/`) with 4 routes: write, read, list, health
+- RBAC via `rbac.json` (application-level, agent identity from X-Agent-Name header)
+- `artifacts.ts` rewritten as thin HTTP client (~100 lines, down from 354)
+- `artifact://` URI scheme for cross-agent references
+- docker-compose updated with new containers, Paperclip on external Postgres
+- Bind mount `./artifacts:/artifacts` removed from all agents
+
+### Success criteria
+
+- [ ] `docker compose up -d` brings up full stack from clean state (Postgres, MinIO, artifact service, Paperclip, agents)
+- [ ] Paperclip runs correctly on external Postgres
+- [ ] Agent writes artifact via `write_artifact` → gets `artifact://` URI back
+- [ ] Another agent reads artifact via `read_artifact` with that URI
+- [ ] `list_artifacts` returns filtered results from artifact service
+- [ ] RBAC enforced (agent can't write outside own namespace, read rules respected)
+- [ ] MinIO Console at :9001 shows stored blobs
+- [ ] Existing tests updated for v2 behavior
+
+### Status
+
+Spec complete. Implementation not started.
+
+---
+
+## M2: Social Media Trend Analysis for the Developer Space
 
 ### What
 

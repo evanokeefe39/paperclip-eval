@@ -1,0 +1,14 @@
+extends: existence
+message: "AI writing pattern detected: '%s'"
+level: error
+ignorecase: true
+tokens:
+  - In conclusion
+  - In summary
+  - It's worth noting
+  - Let's dive in
+  - In today's
+  - As we navigate
+  - In the ever-evolving
+  - In the ever-changing
+  - It is important to note

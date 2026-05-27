@@ -47,9 +47,13 @@ src/agents/
       semaphore.ts          Counting semaphore for bounding concurrent async work
       validate.ts           Runtime validators for LLM structured output
       utils.ts              Shared helpers (sleep, stripHtml)
-  skills/                   Paperclip platform tools (Pi extensions wrapping Paperclip REST API)
+  skills/                   Paperclip platform tools and behavioral skills
     client.ts               Shared Paperclip API client — session-cookie auth with caching
     paperclip-tools.ts      Pi extension registering all 40 Paperclip MCP tools
+    paperclip-skills/       Behavioral skills fetched from Paperclip repo (gitignored)
+      paperclip/            Core heartbeat protocol, API reference, coordination
+      paperclip-converting-plans-to-tasks/  Plan-to-issue decomposition
+      para-memory-files/    PARA-method persistent agent memory
   ceo/                      CEO agent config and prompt
     agent.json              Agent registration metadata (name, role, adapter config)
     .pi/agent/config.yml
@@ -101,7 +105,7 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - Pi requires auth.json at ~/.pi/agent/auth.json inside containers (provider-specific structure for minimax/deepseek)
 - First-time setup: `bash src/agents/setup.sh` (works from Git Bash, WSL, or PowerShell via `setup.ps1`). Subsequent starts: `docker compose up -d`
 - Docker Compose project name pinned to `paperclip-eval` via `name:` key — safe to rename/move the repo directory
-- setup.sh is idempotent — safe to re-run. Skips existing companies/agents, creates API keys, writes per-agent `.env` files
+- setup.sh is idempotent — safe to re-run. Fetches latest Paperclip skills from GitHub, skips existing companies/agents, creates API keys, writes per-agent `.env` files
 - All setup config via env vars: PAPERCLIP_URL, ADMIN_EMAIL, ADMIN_PASS, COMPANY_NAME, COMPOSE_FILE, SKIP_BUILD
 - Adding a new agent: create a directory with .pi/agent/config.yml and agent.json, then re-run setup.sh
 - Per-agent config in `src/agents/{name}/.env` — Paperclip credentials (API key, agent ID, company ID) plus agent-specific overrides (PI_PROVIDER, BRIDGE_TIMEOUT_MS, etc.)
@@ -120,6 +124,18 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - If PAPERCLIP_API_URL or PAPERCLIP_API_KEY is missing, the extension silently skips registration (no crash)
 - API paths match the upstream MCP server at `packages/mcp-server/src/tools.ts` — all paths relative to `/api`
 - Tests: `node tests/paperclip-tools/unit-test.mjs` (162 tests, fake server) and `bash tests/paperclip-tools/integration-test.sh` (live stack)
+
+## Paperclip skills (behavioral — heartbeat protocol)
+
+- HTTP adapter agents also don't receive Paperclip's bundled behavioral skills (SKILL.md files that teach agents the heartbeat protocol, delegation patterns, memory)
+- Local adapters get skills via `syncSkills` — symlinked into agent CLI discovery path. HTTP adapter has no `syncSkills` implementation.
+- Solution: setup.sh fetches SKILL.md files from `github.com/paperclipai/paperclip/master/skills/` into `src/agents/skills/paperclip-skills/`
+- bridge.mjs passes `--skill /app/skills/paperclip-skills/{name}` for each skill to Pi's spawn args
+- Pi loads skills natively with progressive disclosure: only skill descriptions in context, full SKILL.md content loaded on demand when agent needs it
+- Default skills (configurable via `PAPERCLIP_SKILLS` env var): `paperclip` (core heartbeat protocol + API reference), `paperclip-converting-plans-to-tasks` (issue decomposition), `para-memory-files` (PARA-method persistent memory)
+- Skills include reference files under `references/` subdirectories — available on disk for agent file reads
+- Fetched content is gitignored — always pulled fresh from GitHub at setup time
+- Paperclip repo has 8 bundled skills total; we fetch the 3 relevant to agent coordination (the others are for Paperclip development, benchmarking, or plugin creation)
 
 ## Agent web tools
 

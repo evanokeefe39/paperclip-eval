@@ -1,0 +1,122 @@
+[
+  {
+    "name": "aida",
+    "label": "AIDA",
+    "steps": [
+      {
+        "name": "attention",
+        "purpose": "Hook that stops the scroll",
+        "constraints": "1-2 sentences max, lead with surprising stat or bold claim"
+      },
+      {
+        "name": "interest",
+        "purpose": "Expand with relevant information, build curiosity",
+        "constraints": "Connect to reader's context, use specific details not generalities"
+      },
+      {
+        "name": "desire",
+        "purpose": "Connect to reader's needs, paint outcome",
+        "constraints": "Focus on benefits not features, use emotional language"
+      },
+      {
+        "name": "action",
+        "purpose": "Clear CTA with low friction",
+        "constraints": "Single specific action, remove ambiguity"
+      }
+    ],
+    "best_for": ["ads", "landing pages", "email subject lines"]
+  },
+  {
+    "name": "pas",
+    "label": "PAS",
+    "steps": [
+      {
+        "name": "problem",
+        "purpose": "Name the pain directly",
+        "constraints": "Use the reader's own language, be specific not vague, avoid editorializing"
+      },
+      {
+        "name": "agitate",
+        "purpose": "Amplify the consequences of inaction",
+        "constraints": "Make the cost of doing nothing vivid, escalate emotional stakes without exaggerating"
+      },
+      {
+        "name": "solution",
+        "purpose": "Present the fix with proof",
+        "constraints": "Introduce the solution after the pain is felt, pair with at least one concrete proof point"
+      }
+    ],
+    "best_for": ["sales pages", "email sequences", "case studies"]
+  },
+  {
+    "name": "bab",
+    "label": "BAB",
+    "steps": [
+      {
+        "name": "before",
+        "purpose": "Describe the current painful state",
+        "constraints": "Mirror the reader's situation precisely, no sugarcoating, first-person voice where appropriate"
+      },
+      {
+        "name": "after",
+        "purpose": "Describe the desired future state",
+        "constraints": "Make the outcome concrete and measurable, paint a vivid picture of life after the change"
+      },
+      {
+        "name": "bridge",
+        "purpose": "Explain how to get from before to after",
+        "constraints": "Position the product or action as the bridge, keep it credible and specific"
+      }
+    ],
+    "best_for": ["testimonials", "transformation stories", "product launches"]
+  },
+  {
+    "name": "fab",
+    "label": "FAB",
+    "steps": [
+      {
+        "name": "features",
+        "purpose": "State what it does, technically",
+        "constraints": "Factual and precise, no hype words, use specs and measurables where possible"
+      },
+      {
+        "name": "advantages",
+        "purpose": "Explain why that feature matters, comparatively",
+        "constraints": "Contrast against the alternative or status quo, keep comparative claims defensible"
+      },
+      {
+        "name": "benefits",
+        "purpose": "Describe what the reader gains, emotionally or practically",
+        "constraints": "Focus on outcomes for the reader, not the product itself, use emotional and sensory language"
+      }
+    ],
+    "best_for": ["product descriptions", "comparison content", "tech specs"]
+  },
+  {
+    "name": "4ps",
+    "label": "4Ps",
+    "steps": [
+      {
+        "name": "promise",
+        "purpose": "Make a bold claim or state the key outcome",
+        "constraints": "Lead with the single most compelling benefit, must be credible and specific"
+      },
+      {
+        "name": "picture",
+        "purpose": "Paint a vivid scenario of success",
+        "constraints": "Use sensory and emotional details, place the reader inside the outcome"
+      },
+      {
+        "name": "proof",
+        "purpose": "Back the promise with evidence",
+        "constraints": "Use testimonials, data, case studies, or demonstrations — at least one concrete source"
+      },
+      {
+        "name": "push",
+        "purpose": "Create urgency and drive action",
+        "constraints": "Combine a clear CTA with a genuine reason to act now, avoid manufactured scarcity"
+      }
+    ],
+    "best_for": ["webinars", "long-form sales", "fundraising"]
+  }
+]

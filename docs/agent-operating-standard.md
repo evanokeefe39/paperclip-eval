@@ -331,10 +331,10 @@ Every agent directory requires these files. No exceptions.
   "capabilities": "Short capability summary",
   "runtimeConfig": {
     "heartbeat": {
-      "enabled": false,
-      "intervalMinutes": null
-    },
-    "wakeOnDemand": true
+      "enabled": true,
+      "intervalMs": 120000,
+      "wakeOnDemand": true
+    }
   }
 }
 ```
@@ -343,7 +343,7 @@ Fields explained:
 - `role`: machine-readable slug, matches directory name
 - `reportsTo`: org chart parent (all report to CEO except CEO which reports to board)
 - `adapterConfig.url`: Docker internal network hostname, always port 8080
-- `runtimeConfig`: heartbeat vs. wake-on-demand per heijunka strategy (section 1.5)
+- `runtimeConfig`: heartbeat polls every 120s for work discovery; `wakeOnDemand` adds reactive wakes for lifecycle events. Both are needed — heartbeat for assignment discovery, wakeOnDemand for state-change signals.
 
 ### 3.2 AGENTS.md — System Prompt
 

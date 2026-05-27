@@ -93,7 +93,7 @@ Note: `renderedPrompt` is accepted as an alias for `prompt` (Paperclip sends thi
 ```
 1. Receive POST /invoke
 2. Parse JSON body, extract prompt and systemPrompt
-3. Build spawn args: --mode rpc --no-session --provider X --model Y -e extensions... -e skills/paperclip-tools.ts [--append-system-prompt Z]
+3. Build spawn args: --mode rpc --no-session --provider X --model Y -e extensions... -e skills/paperclip-tools.ts --skill skills/paperclip-skills/... [--append-system-prompt Z]
 4. Spawn pi process with cwd=workspace, env=process.env + body.env
 5. Write {"type":"prompt","message":"..."}\n to stdin immediately
 6. Poll events[] every 50ms:
@@ -118,6 +118,7 @@ Note: `renderedPrompt` is accepted as an alias for `prompt` (Paperclip sends thi
 | PI_MODEL         | MiniMax-M2.7 | Model identifier passed to Pi         |
 | BRIDGE_TIMEOUT_MS| 120000    | Max wait time for agent_start/agent_end  |
 | LOG_LEVEL        | info      | Minimum log level (debug/info/warn/error)|
+| PAPERCLIP_SKILLS | paperclip,paperclip-converting-plans-to-tasks,para-memory-files | Comma-separated Paperclip skill names loaded via Pi's native `--skill` flag |
 
 ## Logging
 

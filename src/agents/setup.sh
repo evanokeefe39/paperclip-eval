@@ -69,6 +69,26 @@ api_post() {
   echo "$resp_body"
 }
 
+api_patch() {
+  local path="$1" body="$2"
+  local url="${PAPERCLIP_URL}${path}"
+  local http_code response
+  response="$(curl -s -w '\n%{http_code}' -X PATCH "$url" \
+    -H 'Content-Type: application/json' \
+    -H "Origin: ${PAPERCLIP_URL}" \
+    -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
+    -d "$body")"
+  http_code="$(echo "$response" | tail -1)"
+  local resp_body
+  resp_body="$(echo "$response" | sed '$d')"
+  if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+    log red "PATCH $path failed (HTTP $http_code)"
+    log red "$resp_body"
+    return 1
+  fi
+  echo "$resp_body"
+}
+
 api_get() {
   local path="$1"
   local url="${PAPERCLIP_URL}${path}"
@@ -221,6 +241,17 @@ register_agent() {
     REGISTERED_AGENTS["$name"]="$agent_id"
     EXISTING_FLAGS["$name"]="true"
     log green "  $name: $agent_id (existing)"
+
+    local patch_payload
+    patch_payload="$(jq '{runtimeConfig, adapterConfig, adapterType, role, title, icon, capabilities}
+      | with_entries(select(.value != null))' "$agent_json")"
+    if [[ "$patch_payload" != "{}" ]]; then
+      if api_patch "/api/agents/${agent_id}" "$patch_payload" >/dev/null 2>&1; then
+        log green "    Config synced from agent.json"
+      else
+        log red "    Failed to sync config (non-fatal)"
+      fi
+    fi
   else
     local payload
     payload="$(cat "$agent_json")"

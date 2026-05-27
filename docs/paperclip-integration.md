@@ -204,6 +204,33 @@ If PAPERCLIP_API_URL or PAPERCLIP_API_KEY is missing, the extension silently ski
 - Unit tests: `node tests/paperclip-tools/unit-test.mjs` (162 tests against fake HTTP server)
 - Integration tests: `bash tests/paperclip-tools/integration-test.sh` (requires live Docker stack)
 
+## Paperclip Behavioral Skills (Heartbeat Protocol)
+
+Beyond MCP tools, Paperclip provides bundled behavioral skills — SKILL.md markdown files that teach agents how to operate within Paperclip's coordination model (heartbeat protocol, checkout/release discipline, delegation patterns, memory).
+
+Local adapters receive these skills automatically via `syncSkills` (symlinked into agent CLI discovery path at `~/.pi/agent/skills/`). The HTTP adapter does not implement `syncSkills`, so HTTP-adapted agents get neither tools nor skills by default.
+
+### How this project provides skills to HTTP adapter agents
+
+1. `setup.sh` fetches SKILL.md files (and their reference documents) from `github.com/paperclipai/paperclip/master/skills/` into `src/agents/skills/paperclip-skills/`
+2. The Dockerfile copies them into containers at `/app/skills/paperclip-skills/`
+3. `bridge.mjs` passes `--skill /app/skills/paperclip-skills/{name}` for each skill to Pi's spawn args
+4. Pi loads skills natively with progressive disclosure: only the skill's `description` from frontmatter is injected into context; the full SKILL.md content is loaded on demand when the agent decides the skill is relevant
+
+### Skills loaded
+
+| Skill | Purpose | Reference files |
+|-------|---------|-----------------|
+| `paperclip` | 9-step heartbeat protocol, authentication, checkout/release, comment handling, delegation, planning, API reference | api-reference.md, company-skills.md, issue-workspaces.md, routines.md, workflows.md |
+| `paperclip-converting-plans-to-tasks` | Translating plans into executable issue trees with correct specialty assignments, dependencies, and parallelization | (none) |
+| `para-memory-files` | Three-layer persistent memory: PARA knowledge graph, daily notes, tacit knowledge | schemas.md |
+
+### Configuration
+
+The `PAPERCLIP_SKILLS` environment variable controls which skills are loaded (comma-separated names). Defaults to all three. Override per-agent via the agent's `.env` file.
+
+Skills are fetched fresh from GitHub on every `setup.sh` run and are gitignored (not source-controlled). The `.dockerignore` has an explicit `!skills/paperclip-skills/` whitelist since `*.md` is otherwise excluded from the build context.
+
 ## Plugins
 
 Paperclip supports a plugin system where community or first-party plugins run inside the Paperclip server process. Plugins register tools via the `agent.tools.register` capability, subscribe to platform events (issue creation, approval lifecycle, agent errors), and extend the UI with custom views.

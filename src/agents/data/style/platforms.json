@@ -1,0 +1,84 @@
+{
+  "twitter": {
+    "label": "Twitter/X",
+    "char_limit": 280,
+    "structure": "Thread format if multi-post, numbered or unnumbered continuation",
+    "tone": "Conversational, opinionated, punchy",
+    "paragraph_max_sentences": 1,
+    "cta": "Question or bold statement to drive engagement",
+    "rules": [
+      "Hook in first post (question, bold claim, stat)",
+      "No hashtag spam (0-2 max)",
+      "Sentence fragments normal",
+      "No em dashes"
+    ]
+  },
+  "linkedin": {
+    "label": "LinkedIn",
+    "char_limit": 3000,
+    "structure": "Hook-first with 2-line opener visible before 'see more', body in short paragraphs, close with CTA or question",
+    "tone": "Business-casual, authoritative, personal",
+    "paragraph_max_sentences": 2,
+    "cta": "Question to invite comments or direct call-to-action",
+    "rules": [
+      "First 2 lines must compel the click to 'see more'",
+      "1-2 sentences per paragraph, generous white space",
+      "Emojis sparingly OK (0-3 total)",
+      "No hashtag spam (2-4 relevant tags at end)",
+      "Personal anecdote or data point in opening"
+    ]
+  },
+  "blog": {
+    "label": "Blog Post",
+    "char_limit": null,
+    "word_count_typical": "800-2000",
+    "structure": "Hook within first 100 words, H2/H3 headings every 200-300 words, scannable body, conclusion with takeaway",
+    "tone": "Conversational authority",
+    "paragraph_max_sentences": 4,
+    "cta": "Inline links and end-of-post action",
+    "meta_description_chars": 155,
+    "rules": [
+      "Opening hook within first 100 words",
+      "H2 or H3 subheading every 200-300 words",
+      "Links inline, not listed at end",
+      "Meta description (155 chars) as a separate output",
+      "Avoid passive voice where possible",
+      "One idea per paragraph"
+    ]
+  },
+  "whitepaper": {
+    "label": "Whitepaper",
+    "char_limit": null,
+    "word_count_typical": "3000-10000",
+    "structure": "Executive summary required, numbered sections, data tables and charts referenced inline, citations throughout",
+    "tone": "Formal, academic-adjacent, authoritative",
+    "paragraph_max_sentences": 6,
+    "cta": "Recommendations section or contact information at close",
+    "citation_style_default": "apa",
+    "rules": [
+      "Executive summary required (250-400 words)",
+      "Numbered sections for navigation",
+      "All data tables and charts must be referenced in body text",
+      "Citations in chosen style (APA default)",
+      "No first-person singular, prefer 'we' or passive construction",
+      "Define all acronyms on first use"
+    ]
+  },
+  "email": {
+    "label": "Email",
+    "char_limit": null,
+    "structure": "Subject line + preview text, front-loaded ask in first 2 sentences, scannable body, single CTA",
+    "tone": "Formality matches relationship (default: professional-friendly)",
+    "paragraph_max_sentences": 3,
+    "cta": "Single specific action, button or linked text",
+    "subject_line_words": "6-10",
+    "rules": [
+      "Subject line: 6-10 words, specific not generic",
+      "Front-load the ask or key point in first 2 sentences",
+      "Use bullets if listing more than 3 points",
+      "One CTA only — no competing actions",
+      "Preview text should complement subject line, not repeat it",
+      "Sign-off matches relationship formality"
+    ]
+  }
+}

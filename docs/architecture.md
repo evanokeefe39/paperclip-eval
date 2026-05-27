@@ -47,6 +47,7 @@
 - Stateless per-request: each invocation spawns a fresh Pi process
 - Each container runs `bridge.mjs` as its entrypoint
 - Pi extensions loaded at spawn: web-search, web-fetch, escalate (v2, local/discord backend), web-scrape, paperclip-tools, artifacts, logging
+- Paperclip behavioral skills loaded via Pi's native `--skill` flag: paperclip (heartbeat protocol), paperclip-converting-plans-to-tasks, para-memory-files
 - pi-otel installed for automatic OTel tracing (pi.interaction → pi.turn → pi.llm_request / pi.tool.* spans)
 
 ### Discord Plugin (paperclip-plugin-discord v0.7.3)
@@ -133,9 +134,15 @@ Pi extensions are TypeScript files loaded via `-e` flags at spawn time. They reg
   paperclip-tools.ts         40 tools matching upstream MCP server (issues, comments,
                              documents, agents, projects, goals, interactions, approvals,
                              workspace runtime, escape hatch)
+  paperclip-skills/          Behavioral skills (SKILL.md files from Paperclip repo)
+    paperclip/               Core heartbeat protocol + 5 reference docs
+    paperclip-converting-plans-to-tasks/  Plan decomposition into issue trees
+    para-memory-files/       PARA-method persistent memory + schema reference
 ```
 
-The Paperclip skills exist because the HTTP adapter does not inject MCP tools automatically. Local adapters (claude_local, pi_local) get these tools via a built-in MCP server subprocess. HTTP adapter agents must call the REST API directly, which is what the skills extension does.
+The Paperclip tools extension exists because the HTTP adapter does not inject MCP tools automatically. Local adapters (claude_local, pi_local) get these tools via a built-in MCP server subprocess. HTTP adapter agents must call the REST API directly, which is what the tools extension does.
+
+The Paperclip behavioral skills exist for the same reason — local adapters get them via `syncSkills` (symlinked into agent CLI discovery path). HTTP adapter agents don't. setup.sh fetches SKILL.md files from GitHub and bridge.mjs loads them via Pi's native `--skill` flag with progressive disclosure (only descriptions in context until the agent needs full content).
 
 Extensions can import from relative paths (e.g., `paperclip-tools.ts` imports from `./client.js`). Pi resolves these at load time. Cross-directory imports also work (e.g., `escalate.ts` imports from `../skills/client.js`).
 

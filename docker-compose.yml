@@ -107,9 +107,7 @@ services:
     <<: *agent
     build:
       context: src/agents
-      dockerfile: Dockerfile
-      args:
-        AGENT_NAME: writer
+      dockerfile: writer/Dockerfile
     ports:
       - "8084:8080"
     env_file:

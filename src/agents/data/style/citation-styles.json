@@ -1,0 +1,50 @@
+{
+  "apa": {
+    "label": "APA 7th Edition",
+    "inline_format": "(Author, Year)",
+    "bibliography_format": "Author, A. A. (Year). Title of work. Publisher. URL",
+    "ordering": "alphabetical by author last name",
+    "required_fields": ["author", "year", "title", "source"],
+    "when_to_use": "Social sciences, business, education"
+  },
+  "mla": {
+    "label": "MLA 9th Edition",
+    "inline_format": "(Author Page)",
+    "bibliography_format": "Author Last, First. Title of Work. Publisher, Year.",
+    "ordering": "alphabetical by author last name",
+    "required_fields": ["author", "title", "publisher", "year"],
+    "when_to_use": "Humanities, literature, language arts"
+  },
+  "chicago": {
+    "label": "Chicago 17th Edition",
+    "inline_format": "Footnotes (N) or (Author Year) for author-date variant",
+    "bibliography_format": "Author Last, First. Title of Work. City: Publisher, Year.",
+    "ordering": "alphabetical by author last name",
+    "required_fields": ["author", "title", "publisher", "city", "year"],
+    "when_to_use": "History, arts, humanities, publishing"
+  },
+  "harvard": {
+    "label": "Harvard",
+    "inline_format": "(Author Year)",
+    "bibliography_format": "Author Last, First Initial. (Year) Title of work. Publisher.",
+    "ordering": "alphabetical by author last name",
+    "required_fields": ["author", "year", "title", "publisher"],
+    "when_to_use": "Sciences, social sciences, UK and Australian academia"
+  },
+  "ieee": {
+    "label": "IEEE",
+    "inline_format": "[1]",
+    "bibliography_format": "[1] A. A. Author, \"Title of article,\" Journal Name, vol. X, no. X, pp. XX-XX, Year.",
+    "ordering": "numbered in citation order",
+    "required_fields": ["author", "title", "journal_or_publisher", "year"],
+    "when_to_use": "Engineering, computer science, electronics"
+  },
+  "vancouver": {
+    "label": "Vancouver",
+    "inline_format": "(1)",
+    "bibliography_format": "1. Author AA, Author BB. Title of article. Journal Abbreviation. Year;Volume(Issue):Pages.",
+    "ordering": "numbered in citation order",
+    "required_fields": ["author", "title", "journal", "year", "volume", "pages"],
+    "when_to_use": "Medicine, biomedical sciences, clinical research"
+  }
+}

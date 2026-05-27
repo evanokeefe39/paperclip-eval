@@ -1,0 +1,30 @@
+extends: existence
+message: "AI excess word '%s' — consider a simpler alternative."
+level: error
+ignorecase: true
+tokens:
+  - delve
+  - tapestry
+  - multifaceted
+  - utilize
+  - harness
+  - leverage
+  - furthermore
+  - moreover
+  - realm
+  - intricate
+  - pivotal
+  - encompass
+  - navigating
+  - testament
+  - paramount
+  - noteworthy
+  - commendable
+  - groundbreaking
+  - transformative
+  - indispensable
+  - meticulous
+  - spearhead
+  - elucidate
+  - overarching
+  - plethora

@@ -154,12 +154,15 @@ const server = http.createServer(async (req, res) => {
   const systemPrompt = body.systemPrompt || "";
   const prompt = body.prompt || body.renderedPrompt || "Continue your work.";
 
+  log("debug", "invoke_env_keys", { keys: body.env ? Object.keys(body.env) : [], runId: body.runId || body.id || null });
+
+  const runId = body.env?.PAPERCLIP_RUN_ID || body.runId || null;
   const wakeContext = {
     reason: body.env?.PAPERCLIP_WAKE_REASON || "heartbeat",
     taskId: body.env?.PAPERCLIP_TASK_ID || null,
     commentId: body.env?.PAPERCLIP_WAKE_COMMENT_ID || null,
     approvalId: body.env?.PAPERCLIP_APPROVAL_ID || null,
-    runId: body.env?.PAPERCLIP_RUN_ID || null,
+    runId,
   };
   log("info", "wake_context", wakeContext);
 
@@ -189,7 +192,7 @@ const server = http.createServer(async (req, res) => {
   try {
     pi = spawn("pi", spawnArgs, {
       cwd: body.workspace || "/workspace",
-      env: { ...process.env, ...body.env, TRACEPARENT: traceparent },
+      env: { ...process.env, ...body.env, TRACEPARENT: traceparent, ...(runId ? { PAPERCLIP_RUN_ID: runId } : {}) },
     });
   } catch (err) {
     metrics.requests_active--;

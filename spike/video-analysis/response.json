@@ -1,0 +1,64 @@
+{
+  "analysis": {
+    "summary": "Pope Francis delivers a speech calling for artificial intelligence to be disarmed, highlighting its profound impact on humanity, war, and moral decision-making.",
+    "topics": [
+      "Artificial Intelligence",
+      "Disarmament",
+      "Ethics",
+      "War",
+      "Faith",
+      "Reason",
+      "Human Coexistence"
+    ],
+    "on_screen_text": [
+      "VATICAN CITY",
+      "MAY 25",
+      "POPE CALLS FOR AI TO BE 'DISARMED'",
+      "Artificial intelligence",
+      "needs to be disarmed.",
+      "The word is strong,",
+      "I know.",
+      "But deliberately chosen",
+      "because this moment",
+      "capable of attracting",
+      "attention,",
+      "awakening consciences and",
+      "indicating paths forward",
+      "for humanity.",
+      "Artificial intelligence",
+      "already touches",
+      "many areas of our lives",
+      "and affects decisions",
+      "human coexistence.",
+      "It is also",
+      "dramatically changing",
+      "how war is waged.",
+      "Like the earlier Leo,",
+      "I feel entrusted",
+      "to look upon",
+      "another huge transformation",
+      "with eyes of faith,",
+      "with lucidity of reason,",
+      "with openness to mystery,",
+      "and with cries of the poor",
+      "and the earth",
+      "resounding in my heart."
+    ],
+    "tone": "Serious, urgent, contemplative, and authoritative.",
+    "speakers": [
+      {
+        "name": "Pope Francis",
+        "said": "Artificial intelligence needs to be disarmed. The word is strong, I know, but deliberately chosen because this moment needs words capable of attracting attention, awakening consciences, and indicating paths forward for humanity. Artificial intelligence already touches many areas of our lives and affects decisions that shape human coexistence. It is also dramatically changing how war is waged. Like the earlier Leo, I feel entrusted to look upon another huge transformation with eyes of faith, with lucidity of reason, with openness to mystery, and with cries of the poor and the earth resounding in my heart."
+      }
+    ],
+    "transcript_summary": "The Pope argues that AI requires disarmament due to its significant influence on human life and warfare. He emphasizes the need for a balanced approach combining faith, reason, and concern for the vulnerable."
+  },
+  "usage": {
+    "prompt_tokens": 9246,
+    "total_tokens": 11089,
+    "completion_tokens": 1843,
+    "prompt_tokens_details": null
+  },
+  "elapsed_s": 20.2,
+  "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+}
