@@ -1,5 +1,9 @@
 # T4 (Apify) untested — APIFY_API_TOKEN not set
 
+## Status
+
+Resolved (2026-05-27). APIFY_API_TOKEN is in `.env`.
+
 **Severity:** Medium
 **Component:** tests/scraping/real-world-tests.sh, .env
 **Found:** 2026-05-26 real-world scraping campaign

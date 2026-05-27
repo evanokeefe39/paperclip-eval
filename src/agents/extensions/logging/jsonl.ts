@@ -1,36 +1,26 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
-import type { LogEntry } from "./types.js";
-
-const ARTIFACTS_ROOT = "/artifacts";
+import * as client from "../artifact-client.js";
 
 export class JsonlWriter {
-  private filePath: string | null = null;
+  private agentName: string;
   private enabled: boolean;
 
   constructor(agentName: string, enabled: boolean) {
+    this.agentName = agentName;
     this.enabled = enabled;
-    if (!agentName || !enabled) return;
-
-    const dir = path.join(ARTIFACTS_ROOT, agentName);
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-      this.filePath = path.join(dir, "run.log.jsonl");
-    } catch {
-      this.filePath = null;
-    }
   }
 
-  append(entry: LogEntry): void {
-    if (!this.filePath) return;
-    try {
-      fs.appendFileSync(this.filePath, JSON.stringify(entry) + "\n", "utf8");
-    } catch {
-      // Volume not mounted or write error — silent
-    }
+  append(entry: Record<string, unknown>): void {
+    if (!this.enabled || !this.agentName) return;
+    client.append({
+      filename: "run.log.jsonl",
+      line: JSON.stringify(entry),
+      type: "log",
+      bucket: "logs",
+    }).catch(() => {});
   }
 
   getPath(): string | null {
-    return this.filePath;
+    if (!this.enabled || !this.agentName) return null;
+    return `logs/${this.agentName}/run.log.jsonl`;
   }
 }

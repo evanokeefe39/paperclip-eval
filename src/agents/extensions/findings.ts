@@ -1,27 +1,8 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
-import { ulid } from "./workproduct/ulid.js";
-import {
-  getAgentName, getSessionId, workProductDir, sessionFilePath,
-  appendRecord, readRecords, findRecordById, updateRecord, scanAllAgents,
-} from "./workproduct/storage.js";
+import * as client from "./artifact-client.js";
 import { validateByStyle, type StyleProfiles } from "./workproduct/validate.js";
-
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
-
-const AGENT_NAME = getAgentName();
-const SUBDIR = "findings";
-
-function findingsDir(): string {
-  return workProductDir(AGENT_NAME, SUBDIR);
-}
-
-function sessionPath(sessionId: string): string {
-  return sessionFilePath(AGENT_NAME, SUBDIR, sessionId);
-}
 
 // ---------------------------------------------------------------------------
 // TypeBox schemas (source of truth — matches findings-schema.md spec)
@@ -144,7 +125,7 @@ function admiraltyGrade(sources: SourceInput[], primaryIndex: number): string | 
 }
 
 // ---------------------------------------------------------------------------
-// StoredFinding type
+// StoredFinding type (used as metadata shape)
 // ---------------------------------------------------------------------------
 
 interface StoredFinding {
@@ -199,13 +180,44 @@ function getPromptSnippet(): string {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function getSessionId(): string {
+  return process.env.PAPERCLIP_RUN_ID || process.env.SESSION_ID || "default";
+}
+
+/** Reconstruct a StoredFinding from an ArtifactRecord + its content. */
+function recordToFinding(rec: client.ArtifactRecord, content: string): StoredFinding {
+  const m = rec.metadata as Record<string, any>;
+  return {
+    id: rec.id,
+    session_id: m.session_id || "",
+    agent: rec.agent_name,
+    timestamp: rec.created_at,
+    claim_preview: m.claim_preview || "",
+    style: m.style || "general",
+    claim: content,
+    sources: m.sources || [],
+    primary_source_index: m.primary_source_index ?? 0,
+    corroboration: m.corroboration || "uncorroborated",
+    date_information: m.date_information,
+    topic_tags: m.topic_tags || [],
+    entities: m.entities || [],
+    related_findings: m.related_findings || [],
+    contradicts: m.contradicts || [],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Extension
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
-  if (!AGENT_NAME) return;
+  if (!client.getAgentName()) return;
 
   const snippet = getPromptSnippet();
+  const agentName = client.getAgentName();
 
   // ---- record_finding ----
   pi.registerTool({
@@ -264,31 +276,34 @@ export default function (pi: ExtensionAPI) {
           };
         }
 
-        const id = ulid();
         const corroboration = inferCorroboration(sources, params.corroboration);
         const grade = admiraltyGrade(sources, primaryIdx);
+        const sessionId = getSessionId();
 
-        const finding: StoredFinding = {
-          id,
-          session_id: getSessionId(),
-          agent: AGENT_NAME,
-          timestamp: now,
-          claim_preview: params.claim.slice(0, 120),
-          style,
-          claim: params.claim,
-          sources,
-          primary_source_index: primaryIdx,
-          corroboration,
-          date_information: params.date_information || undefined,
-          topic_tags: params.topic_tags || [],
-          entities: params.entities || [],
-          related_findings: params.related_findings || [],
-          contradicts: params.contradicts || [],
-        };
+        const result = await client.write({
+          type: "finding",
+          bucket: "artifacts",
+          filename: "finding.json",
+          mime: "application/json",
+          content: JSON.stringify(params.claim),
+          metadata: {
+            style,
+            sources,
+            primary_source_index: primaryIdx,
+            corroboration,
+            admiralty_grade: grade,
+            date_information: params.date_information || undefined,
+            topic_tags: params.topic_tags || [],
+            entities: params.entities || [],
+            related_findings: params.related_findings || [],
+            contradicts: params.contradicts || [],
+            claim_preview: params.claim.slice(0, 120),
+            session_id: sessionId,
+          },
+          run_id: sessionId,
+        });
 
-        appendRecord(finding, sessionPath(finding.session_id));
-
-        const parts = [`Finding recorded: ${id}`];
+        const parts = [`Finding recorded: ${result.id}`];
         if (grade) parts.push(`ADMIRALTY grade: ${grade}`);
         parts.push(`Corroboration: ${corroboration}`);
         parts.push(`Sources: ${sources.length}`);
@@ -298,7 +313,7 @@ export default function (pi: ExtensionAPI) {
 
         return {
           content: [{ type: "text" as const, text: parts.join("\n") }],
-          details: { id, admiralty_grade: grade, corroboration, source_count: sources.length, warnings },
+          details: { id: result.id, admiralty_grade: grade, corroboration, source_count: sources.length, warnings },
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -320,16 +335,20 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId: string, params: Record<string, any>, _signal?: AbortSignal) {
       try {
-        const finding = findRecordById<StoredFinding>(findingsDir(), params.finding_id);
-        if (!finding) {
-          return { content: [{ type: "text" as const, text: `Error: finding ${params.finding_id} not found` }] };
+        const { content: rawContent, metadata: rec } = await client.read(params.finding_id);
+        if (rec.artifact_type !== "finding") {
+          return { content: [{ type: "text" as const, text: `Error: artifact ${params.finding_id} is not a finding` }] };
         }
+
+        const m = rec.metadata as Record<string, any>;
+        const existingSources: SourceInput[] = m.sources || [];
+        const style: string = m.style || "general";
 
         const src: SourceInput = params.source;
         if (!src.date_accessed) src.date_accessed = new Date().toISOString();
 
         const { errors, warnings } = validateByStyle(
-          FINDING_PROFILES, finding.style, [src] as Record<string, unknown>[], {},
+          FINDING_PROFILES, style, [src] as Record<string, unknown>[], {},
         );
         if (errors.length > 0) {
           return {
@@ -337,22 +356,28 @@ export default function (pi: ExtensionAPI) {
           };
         }
 
-        finding.sources.push(src);
-        finding.corroboration = inferCorroboration(finding.sources);
-        updateRecord(finding, findingsDir());
+        const updatedSources = [...existingSources, src];
+        const corroboration = inferCorroboration(updatedSources);
+        const primaryIdx: number = m.primary_source_index ?? 0;
 
-        const grade = admiraltyGrade(finding.sources, finding.primary_source_index);
+        await client.updateMetadata(params.finding_id, {
+          ...m,
+          sources: updatedSources,
+          corroboration,
+        });
+
+        const grade = admiraltyGrade(updatedSources, primaryIdx);
         const parts = [
-          `Source added to finding ${finding.id}`,
-          `Sources: ${finding.sources.length}`,
-          `Corroboration: ${finding.corroboration}`,
+          `Source added to finding ${params.finding_id}`,
+          `Sources: ${updatedSources.length}`,
+          `Corroboration: ${corroboration}`,
         ];
         if (grade) parts.push(`Primary ADMIRALTY grade: ${grade}`);
         if (warnings.length > 0) parts.push(`\nWarnings:\n${warnings.join("\n")}`);
 
         return {
           content: [{ type: "text" as const, text: parts.join("\n") }],
-          details: { finding_id: finding.id, source_count: finding.sources.length, corroboration: finding.corroboration },
+          details: { finding_id: params.finding_id, source_count: updatedSources.length, corroboration },
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -380,43 +405,61 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId: string, params: Record<string, any>, _signal?: AbortSignal) {
       try {
-        const targetAgent = params.agent || AGENT_NAME;
-        const dir = workProductDir(targetAgent, SUBDIR);
+        const targetAgent = params.agent || agentName;
 
-        let findings = readRecords<StoredFinding>(dir, params.session_id);
+        // Build metadata filter for server-side JSONB containment
+        const metadataFilter: Record<string, unknown> = {};
+        if (params.style) metadataFilter.style = params.style;
+        if (params.session_id) metadataFilter.session_id = params.session_id;
 
+        const records = await client.list({
+          type: "finding",
+          agent: targetAgent,
+          since: params.since,
+          metadata: Object.keys(metadataFilter).length > 0 ? metadataFilter : undefined,
+        });
+
+        // Post-filter for criteria the metastore cannot handle (substring, numeric comparison)
         const reliabilityOrder = "ABCDEF";
+        let findings: Array<{ rec: client.ArtifactRecord; m: Record<string, any> }> = records.map(rec => ({
+          rec,
+          m: rec.metadata as Record<string, any>,
+        }));
+
         if (params.topic_tag) {
           const tag = params.topic_tag.toLowerCase();
-          findings = findings.filter(f => f.topic_tags.some(t => t.toLowerCase().includes(tag)));
+          findings = findings.filter(({ m }) => {
+            const tags: string[] = m.topic_tags || [];
+            return tags.some((t: string) => t.toLowerCase().includes(tag));
+          });
         }
         if (params.entity) {
           const ent = params.entity.toLowerCase();
-          findings = findings.filter(f => f.entities.some(e => e.toLowerCase().includes(ent)));
-        }
-        if (params.since) {
-          findings = findings.filter(f => f.timestamp >= params.since);
-        }
-        if (params.style) {
-          findings = findings.filter(f => f.style === params.style);
+          findings = findings.filter(({ m }) => {
+            const entities: string[] = m.entities || [];
+            return entities.some((e: string) => e.toLowerCase().includes(ent));
+          });
         }
         if (params.min_reliability) {
           const minIdx = reliabilityOrder.indexOf(params.min_reliability);
-          findings = findings.filter(f => {
-            const primary = f.sources[f.primary_source_index];
+          findings = findings.filter(({ m }) => {
+            const sources: SourceInput[] = m.sources || [];
+            const primary = sources[m.primary_source_index ?? 0];
             if (!primary?.source_reliability) return false;
             return reliabilityOrder.indexOf(primary.source_reliability) <= minIdx;
           });
         }
         if (params.max_credibility) {
-          findings = findings.filter(f => {
-            const primary = f.sources[f.primary_source_index];
+          findings = findings.filter(({ m }) => {
+            const sources: SourceInput[] = m.sources || [];
+            const primary = sources[m.primary_source_index ?? 0];
             if (!primary?.information_credibility) return false;
             return primary.information_credibility <= params.max_credibility;
           });
         }
 
-        findings.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        // Sort by created_at DESC (service may already do this, but ensure it)
+        findings.sort((a, b) => b.rec.created_at.localeCompare(a.rec.created_at));
 
         const limit = params.limit || 50;
         findings = findings.slice(0, limit);
@@ -426,12 +469,13 @@ export default function (pi: ExtensionAPI) {
         }
 
         const lines: string[] = [`Found ${findings.length} finding(s):\n`];
-        for (const f of findings) {
-          const primary = f.sources[f.primary_source_index];
+        for (const { rec, m } of findings) {
+          const sources: SourceInput[] = m.sources || [];
+          const primary = sources[m.primary_source_index ?? 0];
           const grade = primary?.source_reliability && primary?.information_credibility
             ? `${primary.source_reliability}${primary.information_credibility}`
             : "—";
-          lines.push(`- [${f.id}] ${grade} | ${f.corroboration} | ${f.sources.length} src | ${f.claim_preview}`);
+          lines.push(`- [${rec.id}] ${grade} | ${m.corroboration || "uncorroborated"} | ${sources.length} src | ${m.claim_preview || ""}`);
         }
 
         return {
@@ -455,16 +499,16 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId: string, params: Record<string, any>, _signal?: AbortSignal) {
       try {
-        const found = scanAllAgents<StoredFinding>(SUBDIR, r => r.id === params.id);
-        if (!found) {
-          return { content: [{ type: "text" as const, text: `Finding ${params.id} not found.` }] };
-        }
+        const { content: rawContent, metadata: rec } = await client.read(params.id);
 
-        const grade = admiraltyGrade(found.sources, found.primary_source_index);
-        const text = JSON.stringify(found, null, 2);
+        const claim = rawContent.toString("utf8");
+        const finding = recordToFinding(rec, JSON.parse(claim));
+        const grade = admiraltyGrade(finding.sources, finding.primary_source_index);
+
+        const text = JSON.stringify(finding, null, 2);
         return {
           content: [{ type: "text" as const, text }],
-          details: { id: found.id, admiralty_grade: grade },
+          details: { id: finding.id, admiralty_grade: grade },
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

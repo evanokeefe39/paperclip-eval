@@ -20,11 +20,11 @@ Host browser (http://localhost:3100)
 │  ┌──────────────────────┐    HTTP POST     ┌─────────────┐  │
 │  │ Paperclip            │ ──────────────── │ CEO bridge  │  │
 │  │ ghcr.io/paperclipai/ │  http://ceo:8080 │ bridge.mjs  │  │
-│  │   paperclip:latest   │                  │   │      ▲   │  │
-│  │                      │    HTTP POST     │   │stdin │   │  │
-│  │ :3100 (embedded PG)  │ ──────────────── │   ▼      │   │  │
-│  └──────────────────────┘  http://          │ pi --mode│   │  │
-│                            researcher:8080  │    rpc   │   │  │
+│  │   paperclip:latest   │                  │   │      ▲  │  │
+│  │                      │    HTTP POST     │   │stdin │  │  │
+│  │ :3100 (embedded PG)  │ ──────────────── │   ▼      │  │  │
+│  └──────────────────────┘  http://         │ pi --mode│  │  │
+│                            researcher:8080 │    rpc   │  │  │
 │                                            └─────────────┘  │
 │                                            ┌─────────────┐  │
 │                                            │ Researcher  │  │

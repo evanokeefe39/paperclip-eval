@@ -2,7 +2,7 @@
 
 ## Status
 
-Open.
+Resolved.
 
 ## Symptom
 
@@ -33,7 +33,18 @@ CEO acted as a solo agent doing everything rather than a manager delegating and 
 
 Medium. The multi-agent orchestration pattern (CEO delegates, specialists execute) doesn't work if CEO does everything. Defeats the purpose of having Researcher and Writer agents.
 
-## Fix direction
+## Resolution (2026-05-27)
+
+Two-layer technical enforcement implemented:
+
+1. **pi-permissions.jsonc**: CEO denied bash, write, edit, checkout, upsert_document, api_request. Only read-only + coordination tools remain visible to LLM.
+2. **triage-workflow.ts**: Phase-gated workflow (TRIAGE → GROUNDING → READY) prevents delegation tools from being called until triage complete. CEO cannot skip phases.
+
+Prompt-level guardrails (AGENTS.md) are secondary — the enforcement layer catches circumvention. Lessons captured in LEARNING.md:
+- "Tool enforcement beats prompt engineering"
+- "CEO must not have work tools" (two-layer access control pattern)
+
+## Original fix direction
 
 - Review CEO AGENTS.md — ensure it explicitly says "create sub-issues, assign, then release your run and wait for heartbeat to wake you when children complete"
 - Create sub-issues with status `todo` not `in_progress`

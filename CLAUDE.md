@@ -10,6 +10,8 @@ Evaluation repo for running Paperclip agent orchestration with Pi agents via Doc
 docker-compose.yml          Full stack: Paperclip + agent containers (healthcheck on Paperclip)
 .env.example                Template for shared provider API keys and bridge defaults
 artifacts/                  Shared agent artifact storage (bind-mounted into containers at /artifacts)
+scripts/init-artifact-db.sql  Postgres init script (artifact_store + paperclip databases)
+src/artifact-service/       Bun-based artifact storage service (HTTP API, MinIO, Postgres)
 src/agents/
   bridge.mjs               HTTP-to-RPC bridge shim (Node, zero deps)
   Dockerfile               Shared image — node:22-slim + Pi CLI
@@ -17,24 +19,25 @@ src/agents/
   setup.ps1                 Thin WSL wrapper for setup.sh
   bootstrap-invite.cjs      DB-level bootstrap invite creator (idempotent, bypasses CLI)
   paperclip-config.json     Config template for Paperclip CLI compatibility
+  rbac.json                 Per-agent artifact access control rules
   .dockerignore             Excludes .env and non-build files from image context
   extensions/               Pi extensions — selectively copied per agent by Dockerfile
     web-search.ts           Exa-backed web search tool (registered as web_search)
     web-fetch.ts            URL fetch tool with Jina Reader fallback (registered as web_fetch)
     web-scrape.ts           Web scraping tool
     escalate.ts             Human escalation via Paperclip issues
-    artifacts.ts            Shared artifact helpers
+    artifact-client.ts      Shared HTTP client for artifact service
+    artifacts.ts            Artifact tools (write/read/list via artifact-client.ts)
     logging.ts              OTel-backed logging (uses logging/ subdir, pi-otel + Aspire Dashboard)
     logging/                Submodules for logging extension
       types.ts              LogEntry, LogLevel types
       buffer.ts             Ring buffer for in-memory log queries
-      jsonl.ts              JSONL file writer (/artifacts/{agent}/run.log.jsonl)
+      jsonl.ts              JSONL log writer (via artifact-client.ts to logs bucket)
       otel.ts               pi-otel event bus integration (structured logs to Aspire)
-    findings.ts             Structured findings with ADMIRALTY grading (uses workproduct/)
+    findings.ts             Structured findings with ADMIRALTY grading (via artifact-client.ts)
     triage-workflow.ts      CEO triage gate — web grounding + routing before delegation
     workproduct/            Shared primitives for standardized work products
       ulid.ts               Monotonic ULID generator (Crockford Base32, no deps)
-      storage.ts            JSONL append/read/update/scan, path conventions, session ID
       validate.ts           Two-level required/encouraged field validation framework
     deep-research.ts        Multi-iteration research tool (uses deep-research/ subdir)
     deep-research/          Engine, prompts, cache, types, validators, concurrency for deep research
@@ -105,6 +108,10 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - Everything runs in Docker via docker-compose (Paperclip + agent bridges)
 - Paperclip image: ghcr.io/paperclipai/paperclip:latest (authenticated mode)
 - Paperclip UI at http://localhost:3100, agents at :8081 (CEO), :8082 (Researcher), :8083 (Data), :8084 (Writer)
+- Postgres shared between Paperclip (DATABASE_URL) and artifact service (artifact_store DB)
+- Artifact service at http://artifact-service:8090 on Docker network, :8090 on host
+- MinIO at http://minio:9000 on Docker network, :9000 (API) and :9001 (console) on host
+- Infrastructure ports: 3100 (Paperclip), 5432 (Postgres), 8090 (artifact service), 9000 (MinIO API), 9001 (MinIO console), 18888 (Aspire Dashboard)
 - On Docker network: Paperclip reaches agents at http://ceo:8080, http://researcher:8080
 - Agents registered via HTTP adapter, not pi_local (bypasses CLI arg length limit)
 - Pi runs in RPC mode inside containers — JSONL over stdin/stdout
@@ -227,11 +234,16 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 
 ## Inter-agent artifact sharing
 
-- Paperclip has no native file/artifact storage — all orchestration is text-in-prompt
-- Shared Docker volume `shared-artifacts` mounted at `/artifacts` in all agent containers
-- Agents write files to `/artifacts/{context}/{filename}`, pass path references in text output (not file content)
-- Consuming agent reads from `/artifacts/...` path received in its wake payload
-- This is the eval-stage solution (Option A). ROADMAP.md describes Option B (MinIO with S3 URIs, presigned URLs, access control)
+- Artifact service at `src/artifact-service/` — Bun HTTP service on :8090 behind Docker network
+- Blob storage: MinIO (S3-compatible) with 3 buckets: artifacts, logs, state
+- Metadata: Postgres with JSONB column for type-specific fields, GIN index for queries
+- Agents write via `artifact-client.ts` (shared HTTP client), never touch filesystem directly
+- Artifacts referenced by `artifact://` URIs (e.g. `artifact://default/default/run123/researcher/research/01JHX_findings.md`)
+- Downstream agent resolves URI via `read_artifact` tool when it needs content
+- RBAC via `src/agents/rbac.json` — glob-pattern read/write rules per agent
+- CEO and QA have full read access; other agents read only from their own namespace and specified peers
+- `docker compose down -v` destroys Postgres AND MinIO data — use backup scripts before wiping
+- MinIO console at :9001 for inspecting stored artifacts during eval
 
 ## Platform
 
@@ -243,6 +255,8 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 
 - bridge.mjs is a starting point, not production code — no auth, no streaming, no retry
 - Environment variables: `BRIDGE_PORT`, `PI_PROVIDER`, `PI_MODEL`, `BRIDGE_TIMEOUT_MS`, plus provider API keys
+- Infrastructure env vars in root `.env`: `POSTGRES_PASSWORD`, `ARTIFACT_DB_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`
+- `ARTIFACT_SERVICE_URL` set per-agent in both docker-compose environment and agent `.env` files (defaults to `http://artifact-service:8090`)
 - Extension loading: bridge autodiscovers all `.ts` files in `/app/extensions/` and `/app/skills/` at startup. Files prefixed with `_` are skipped. No hardcoded list.
 - Which extensions are on disk is controlled by Dockerfile COPY (devtime decision). Which tools the LLM can see is controlled by `pi-permissions.jsonc` (runtime enforcement).
 - HTTP adapter sends `{ agentId, runId, context }` — bridge builds prompt from `context.paperclipTaskMarkdown`, NOT from `body.prompt`/`body.env`

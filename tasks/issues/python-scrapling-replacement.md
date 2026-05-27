@@ -1,5 +1,9 @@
 # Replace Python scrapling with Node-native alternatives
 
+## Status
+
+Deferred — not blocking eval. Folded into ROADMAP.md "Docker image size optimization" task.
+
 ## Problem
 
 web-scrape.ts extension shells out to Python scripts (`scrape_stealth.py`, `scrape_browser.py`) for T2/T3 fetch. This adds Python runtime to every scraping-capable image, duplicates scripts across agent directories, and creates a fragile coupling via hardcoded container paths.

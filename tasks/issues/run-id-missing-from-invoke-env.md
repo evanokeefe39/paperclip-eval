@@ -2,7 +2,7 @@
 
 ## Status
 
-Fix applied, not fully deployed.
+Resolved (2026-05-27) — all agents rebuilt.
 
 ## Symptom
 
@@ -29,7 +29,7 @@ env: { ...process.env, ...body.env, TRACEPARENT: traceparent, ...(runId ? { PAPE
 ## Deploy status
 
 - CEO: rebuilt and verified (runId populated in logs)
-- Researcher, Data, Writer: NOT rebuilt yet. Need `docker compose up -d --build researcher data writer`.
+- Researcher, Data, Writer: rebuilt 2026-05-27.
 
 ## Impact
 

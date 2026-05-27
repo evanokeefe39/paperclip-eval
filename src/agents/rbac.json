@@ -1,0 +1,41 @@
+{
+  "agents": {
+    "ceo": {
+      "read": ["**"],
+      "write": ["*/*/*/ceo/**"]
+    },
+    "researcher": {
+      "read": [
+        "*/*/*/researcher/**",
+        "*/*/*/data/**"
+      ],
+      "write": ["*/*/*/researcher/**"]
+    },
+    "data": {
+      "read": [
+        "*/*/*/data/**",
+        "*/*/*/researcher/**"
+      ],
+      "write": ["*/*/*/data/**"]
+    },
+    "writer": {
+      "read": [
+        "*/*/*/writer/**",
+        "*/*/*/researcher/**",
+        "*/*/*/data/**"
+      ],
+      "write": ["*/*/*/writer/**"]
+    },
+    "coder": {
+      "read": [
+        "*/*/*/coder/**",
+        "*/*/*/researcher/**"
+      ],
+      "write": ["*/*/*/coder/**"]
+    },
+    "qa": {
+      "read": ["**"],
+      "write": ["*/*/*/qa/**"]
+    }
+  }
+}

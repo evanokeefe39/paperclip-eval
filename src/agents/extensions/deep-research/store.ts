@@ -1,45 +1,41 @@
-import { existsSync } from "node:fs";
-import { mkdir, appendFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import type { Finding, IndexEntry, SessionMeta, SubQuery, EngineState } from "./types.js";
+import * as client from "../artifact-client.js";
+import type { Finding, SessionMeta, SubQuery, EngineState } from "./types.js";
 import type { Config } from "./config.js";
 
-export async function initSession(sessionId: string, query: string, config: Config): Promise<void> {
-  const base = `${config.artifacts_base}/sessions/${sessionId}`;
-  await mkdir(`${base}/pages`, { recursive: true });
+export async function initSession(_sessionId: string, _query: string, _config: Config): Promise<void> {
+  // buckets managed by infrastructure — no local dirs to create
 }
 
-export async function streamFinding(finding: Finding, sessionId: string, config: Config): Promise<void> {
-  const base = `${config.artifacts_base}/sessions/${sessionId}`;
-
-  await appendFile(
-    `${base}/findings.jsonl`,
-    JSON.stringify(finding) + "\n"
-  );
-
-  const indexEntry: IndexEntry = {
-    id: finding.id,
-    claim_preview: finding.claim_preview,
-    confidence: finding.confidence,
-    source_url: finding.source_url,
-    session_id: sessionId,
-    timestamp: finding.timestamp,
-    topic_tags: finding.topic_tags,
-    entities: finding.entities,
-  };
-  await appendFile(
-    `${config.artifacts_base}/index.jsonl`,
-    JSON.stringify(indexEntry) + "\n"
-  );
+export async function streamFinding(finding: Finding, sessionId: string, _config: Config): Promise<void> {
+  await client.write({
+    filename: `finding-${finding.id}.json`,
+    content: JSON.stringify(finding),
+    type: "research",
+    bucket: "artifacts",
+    mime: "application/json",
+    metadata: {
+      session_id: sessionId,
+      claim_preview: finding.claim_preview,
+      confidence: finding.confidence,
+      source_url: finding.source_url,
+      topic_tags: finding.topic_tags,
+      entities: finding.entities,
+    },
+  });
 }
 
-export async function storePage(sessionId: string, url: string, content: string, config: Config): Promise<string> {
+export async function storePage(sessionId: string, url: string, content: string, _config: Config): Promise<string> {
   const hash = createHash("sha256").update(url).digest("hex").slice(0, 16);
-  const path = `${config.artifacts_base}/sessions/${sessionId}/pages/${hash}.md`;
-  if (!existsSync(path)) {
-    await writeFile(path, `<!-- Source: ${url} -->\n<!-- Captured: ${new Date().toISOString()} -->\n\n${content}`);
-  }
-  return path;
+  const result = await client.write({
+    filename: `page-${hash}.md`,
+    content: `<!-- Source: ${url} -->\n<!-- Captured: ${new Date().toISOString()} -->\n\n${content}`,
+    type: "research",
+    bucket: "artifacts",
+    mime: "text/markdown",
+    metadata: { session_id: sessionId, source_url: url },
+  });
+  return result.ref;
 }
 
 export async function writeSessionMeta(
@@ -60,17 +56,21 @@ export async function writeSessionMeta(
     iterations: state.iteration,
     config: { max_iterations: config.max_iterations, max_sub_queries: config.max_sub_queries },
   };
-  await writeFile(
-    `${config.artifacts_base}/sessions/${sessionId}/meta.json`,
-    JSON.stringify(meta, null, 2)
-  );
+  await client.write({
+    filename: `session-${sessionId}-meta.json`,
+    content: JSON.stringify(meta, null, 2),
+    type: "session",
+    bucket: "artifacts",
+    mime: "application/json",
+    metadata: { session_id: sessionId, query },
+  });
 }
 
 export async function buildSessionSummary(
   query: string,
   state: EngineState,
   sessionId: string,
-  config: Config
+  _config: Config
 ): Promise<string> {
   const findings = state.allFindings
     .sort((a, b) => b.confidence - a.confidence)
@@ -108,11 +108,17 @@ export async function buildSessionSummary(
 
   const summary = lines.join("\n");
 
-  const base = `${config.artifacts_base}/sessions/${sessionId}`;
   try {
-    await writeFile(`${base}/summary.md`, summary);
+    await client.write({
+      filename: `session-${sessionId}-summary.md`,
+      content: summary,
+      type: "research",
+      bucket: "artifacts",
+      mime: "text/markdown",
+      metadata: { session_id: sessionId, query },
+    });
   } catch {
-    // Non-critical -- summary is returned to agent regardless
+    // Non-critical — summary is returned to agent regardless
   }
 
   return summary;

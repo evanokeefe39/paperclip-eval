@@ -1,6 +1,6 @@
 import * as path from "node:path";
 
-const ALLOWED_ROOTS = ["/artifacts", "/workspace", "/tmp"];
+const ALLOWED_ROOTS = ["/workspace", "/tmp"];
 
 const ROW_LIMIT_THRESHOLD = 100_000;
 

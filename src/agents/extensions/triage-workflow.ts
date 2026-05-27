@@ -1,10 +1,8 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-import { appendFileSync, mkdirSync } from "fs";
-import { join } from "path";
+import { JsonlWriter } from "./logging/jsonl.js";
 
 const AGENT_NAME = process.env.AGENT_NAME || "unknown";
-const LOG_PATH = join("/artifacts", AGENT_NAME, "triage.log.jsonl");
 
 // --- Workflow phases ---
 // TRIAGE:    must call triage_task first
@@ -63,20 +61,16 @@ function isAllowed(toolName: string): boolean {
   return (PHASE_TOOLS[phase] || []).includes(toolName);
 }
 
+const triageWriter = new JsonlWriter(AGENT_NAME, true);
+
 function logEvent(event: string, data: Record<string, unknown>) {
-  const entry = JSON.stringify({
+  triageWriter.append({
     ts: new Date().toISOString(),
     agent: AGENT_NAME,
     phase,
     event,
     ...data,
-  }) + "\n";
-  try { appendFileSync(LOG_PATH, entry); } catch {
-    try {
-      mkdirSync(join("/artifacts", AGENT_NAME), { recursive: true });
-      appendFileSync(LOG_PATH, entry);
-    } catch {}
-  }
+  });
 }
 
 export default function (pi: ExtensionAPI) {

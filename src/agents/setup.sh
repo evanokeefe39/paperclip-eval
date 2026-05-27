@@ -107,22 +107,34 @@ api_get() {
   echo "$resp_body"
 }
 
-wait_healthy() {
-  local timeout="${1:-90}"
+wait_service() {
+  local name="$1" container="$2" check="$3" timeout="${4:-60}"
   local deadline=$((SECONDS + timeout))
-  log cyan "Waiting for Paperclip..."
+  log cyan "Waiting for ${name}..."
   while [[ $SECONDS -lt $deadline ]]; do
-    if dc exec -T paperclip node -e \
-      "fetch('http://localhost:3100/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))" \
-      >/dev/null 2>&1; then
-      log green "Paperclip healthy."
+    if eval "$check" >/dev/null 2>&1; then
+      log green "${name} healthy."
       return 0
     fi
     sleep 2
   done
-  log red "Paperclip not healthy after ${timeout}s"
-  dc logs paperclip --tail 20
+  log red "${name} not healthy after ${timeout}s"
+  dc logs "$container" --tail 20
   return 1
+}
+
+wait_healthy() {
+  wait_service "Postgres" postgres \
+    "dc exec -T postgres pg_isready -U postgres" 60
+
+  wait_service "MinIO" minio \
+    "dc exec -T minio mc ready local" 60
+
+  wait_service "Artifact service" artifact-service \
+    "curl -sf http://127.0.0.1:8090/health" 30
+
+  wait_service "Paperclip" paperclip \
+    "dc exec -T paperclip node -e \"fetch('http://localhost:3100/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\"" 90
 }
 
 authenticate() {
@@ -204,7 +216,7 @@ write_agent_env() {
   local existing_content=""
 
   if [[ -f "$env_file" ]]; then
-    existing_content="$(grep -vE '^(PAPERCLIP_AGENT_ID|PAPERCLIP_API_KEY|PAPERCLIP_API_URL|PAPERCLIP_COMPANY_ID)=' "$env_file" 2>/dev/null || true)"
+    existing_content="$(grep -vE '^(PAPERCLIP_AGENT_ID|PAPERCLIP_API_KEY|PAPERCLIP_API_URL|PAPERCLIP_COMPANY_ID|ARTIFACT_SERVICE_URL)=' "$env_file" 2>/dev/null || true)"
   fi
 
   {
@@ -212,6 +224,7 @@ write_agent_env() {
     echo "PAPERCLIP_API_KEY=${api_key}"
     echo "PAPERCLIP_API_URL=http://paperclip:3100"
     echo "PAPERCLIP_COMPANY_ID=${COMPANY_ID}"
+    echo "ARTIFACT_SERVICE_URL=http://artifact-service:8090"
     if [[ -n "$existing_content" ]]; then
       echo "$existing_content"
     fi

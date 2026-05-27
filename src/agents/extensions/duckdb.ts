@@ -297,7 +297,7 @@ export default function (pi: ExtensionAPI) {
 
         const attachSql = `ATTACH IF NOT EXISTS '${filePath}' AS "${alias}"${roClause}`;
         await conn.run(attachSql);
-        appendState(attachSql);
+        await appendState(attachSql);
 
         // Explore schema
         const sections: string[] = [`Attached: ${filePath} as "${alias}"`, ""];

@@ -4,31 +4,19 @@ This project is in **evaluation stage**. The goal is to validate Paperclip + Pi 
 
 ---
 
-## Planned: MinIO artifact storage (Option B)
+## Done: Artifact Store v2 (MinIO + Postgres metastore)
 
-Replace the shared Docker volume with MinIO (S3-compatible object storage) for inter-agent artifact handoff.
+Replaced the shared Docker volume with a full artifact service: MinIO for blob storage, Postgres for metadata (JSONB), RBAC for per-agent access control. Implemented per plan `tasks/plans/artifact-store-v2.md`.
 
-### Why
+### Architecture
 
-- HTTP-accessible from inside and outside Docker
-- Bucket policies for per-agent access control (security boundary between agents)
-- S3 URIs as artifact references — portable, standard
-- Web console (`:9001`) for inspecting agent output during eval
-- No SDK dependency — agents use `curl` with presigned URLs
-
-### What it looks like
-
-- MinIO container in docker-compose (`minio/minio`, ~150MB)
-- Bucket per run or per agent (TBD based on eval findings)
-- Agents upload via presigned PUT URL, return `s3://artifacts/...` reference in text output
-- Consuming agent receives reference in wake payload, fetches via presigned GET URL
-- Bridge or a thin sidecar handles presigned URL generation
-
-### Blocked on
-
-- Validating the shared volume pattern first (Option A, currently implemented)
-- Understanding what artifact types agents actually produce during eval runs
-- Deciding access control model: per-agent buckets vs. per-run prefixes
+- `artifact-service` (Bun, port 8090): HTTP API for write/read/list/update artifacts
+- `postgres` (17-alpine): metastore with JSONB metadata column, GIN index
+- `minio`: S3-compatible blob storage, 3 buckets (artifacts, logs, state)
+- `artifact-client.ts`: shared HTTP client used by all extensions
+- `rbac.json`: per-agent read/write access control with glob patterns
+- Artifacts referenced by `artifact://` URIs, not filesystem paths
+- All JSONL walk/scan/filter logic replaced by Postgres queries
 
 ---
 
@@ -235,7 +223,7 @@ Implement TPS principles across the pipeline. Phased — each phase solves probl
 
 ### Blocked on
 
-- MinIO (Phase 3+ needs artifact storage for metrics and audit trails)
+- ~~MinIO (Phase 3+ needs artifact storage for metrics and audit trails)~~ — done (artifact store v2)
 - Eval runs with current two-agent setup to identify actual failure modes before building automation
 
 ---

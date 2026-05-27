@@ -44,7 +44,7 @@ export default function (pi: ExtensionAPI) {
             "",
             result.summary,
             "",
-            `Full data: /artifacts/research/sessions/${result.sessionId}/`,
+            `Full data: query list_artifacts with run_id or session_id filter`,
           ].join("\n"),
         }],
       };

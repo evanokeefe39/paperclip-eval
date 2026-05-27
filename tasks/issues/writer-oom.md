@@ -2,7 +2,7 @@
 
 ## Status
 
-Open.
+Fixed (2026-05-27).
 
 ## Symptom
 
@@ -30,7 +30,12 @@ FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memor
 
 Writer is the only agent using deepseek provider. Other agents (MiniMax) don't OOM — unclear if this is coincidence or if DeepSeek's response handling uses more memory.
 
-## Fix options
+## Fix applied
+
+1. `NODE_OPTIONS=--max-old-space-size=1024` added to writer's `.env`
+2. Writer container memory limit increased to 1G in `docker-compose.yml`
+
+## Original fix options
 
 1. `NODE_OPTIONS=--max-old-space-size=1024` in writer's environment (docker-compose or .env)
 2. Increase container memory limit (currently no explicit limit on writer)

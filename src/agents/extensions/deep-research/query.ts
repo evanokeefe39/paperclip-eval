@@ -1,37 +1,54 @@
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import * as client from "../artifact-client.js";
 import type { IndexEntry, Finding } from "./types.js";
 import type { Config } from "./config.js";
 
 export async function queryIndex(
   query: string,
   maxResults: number,
-  config: Config,
+  _config: Config,
   sessionFilter?: string
 ): Promise<IndexEntry[]> {
-  const indexPath = `${config.artifacts_base}/index.jsonl`;
-  if (!existsSync(indexPath)) return [];
+  const filters: Record<string, unknown> = { type: "research" };
+  if (sessionFilter) {
+    filters.metadata = { session_id: sessionFilter };
+  }
+
+  let records;
+  try {
+    records = await client.list(filters as any);
+  } catch {
+    return [];
+  }
 
   const queryTerms = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
   if (queryTerms.length === 0) return [];
 
   const results: { entry: IndexEntry; score: number }[] = [];
 
-  const lines = (await readFile(indexPath, "utf-8")).split("\n").filter(Boolean);
-  for (const line of lines) {
-    const entry: IndexEntry = JSON.parse(line);
-    if (sessionFilter && entry.session_id !== sessionFilter) continue;
+  for (const record of records) {
+    const meta = record.metadata as Record<string, any>;
+    if (sessionFilter && meta.session_id !== sessionFilter) continue;
+
+    const entry: IndexEntry = {
+      id: record.id,
+      claim_preview: meta.claim_preview || "",
+      confidence: meta.confidence || 0,
+      source_url: meta.source_url || "",
+      session_id: meta.session_id || "",
+      timestamp: record.created_at,
+      topic_tags: meta.topic_tags || [],
+      entities: meta.entities || [],
+    };
 
     const searchText = [
       entry.claim_preview,
       ...entry.topic_tags,
-      ...entry.entities.map(e => e.name),
+      ...entry.entities.map((e: any) => typeof e === "string" ? e : e.name),
     ].join(" ").toLowerCase();
 
     const matches = queryTerms.filter(t => searchText.includes(t)).length;
     if (matches === 0) continue;
 
-    // Weight term coverage by confidence so high-confidence findings rank higher
     const score = (matches / queryTerms.length) * entry.confidence;
     results.push({ entry, score });
   }
@@ -42,14 +59,11 @@ export async function queryIndex(
     .map(r => r.entry);
 }
 
-export async function getFullFinding(findingId: string, sessionId: string, config: Config): Promise<Finding | null> {
-  const path = `${config.artifacts_base}/sessions/${sessionId}/findings.jsonl`;
-  if (!existsSync(path)) return null;
-
-  const lines = (await readFile(path, "utf-8")).split("\n").filter(Boolean);
-  for (const line of lines) {
-    const f: Finding = JSON.parse(line);
-    if (f.id === findingId) return f;
+export async function getFullFinding(findingId: string, _sessionId: string, _config: Config): Promise<Finding | null> {
+  try {
+    const result = await client.read(findingId);
+    return JSON.parse(result.content.toString("utf8")) as Finding;
+  } catch {
+    return null;
   }
-  return null;
 }
