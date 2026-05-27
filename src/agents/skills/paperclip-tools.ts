@@ -5,7 +5,7 @@ import {
   resolveCompanyId,
   resolveAgentId,
   isConfigured,
-} from "./client.js";
+} from "./_client.js";
 
 type ToolResult = {
   content: Array<{ type: "text"; text: string }>;

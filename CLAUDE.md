@@ -65,7 +65,7 @@ src/agents/
     .pi/agent/config.yml
     .pi/agent/models.json
     .pi/agent/auth.json     Provider auth (gitignored, symlink to root auth.json)
-    AGENTS.md
+    .pi/agent/AGENTS.md     Project instructions loaded by Pi at startup
   researcher/               Researcher agent config and prompt
     (same structure as ceo/)
   coder/                    Coder agent config and prompt

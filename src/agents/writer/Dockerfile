@@ -14,15 +14,33 @@ ENV NODE_PATH=/usr/local/lib/node_modules
 WORKDIR /app
 
 COPY bridge.mjs .
-COPY extensions/ /app/extensions/
-COPY skills/ /app/skills/
+
+# Universal extensions
+COPY extensions/types/ /app/extensions/types/
+COPY extensions/artifacts.ts /app/extensions/
+COPY extensions/logging.ts /app/extensions/
+COPY extensions/logging/ /app/extensions/logging/
+COPY extensions/escalate.ts /app/extensions/
+
+# Writer-specific extensions
+COPY extensions/web-search.ts /app/extensions/
+COPY extensions/web-fetch.ts /app/extensions/
+COPY extensions/findings.ts /app/extensions/
+COPY extensions/duckdb.ts /app/extensions/
+COPY extensions/duckdb/ /app/extensions/duckdb/
+COPY extensions/style-lint.ts /app/extensions/
+COPY extensions/style-metrics.ts /app/extensions/
+COPY extensions/style-profile.ts /app/extensions/
+COPY extensions/workproduct/ /app/extensions/workproduct/
+
+# Skills
+COPY skills/_client.ts /app/skills/
+COPY skills/paperclip-tools.ts /app/skills/
+COPY skills/paperclip-skills/ /app/skills/paperclip-skills/
+
+# Agent config + writer assets
 COPY data/style/ /app/data/style/
-COPY writer/.pi/agent/config.yml /root/.pi/agent/config.yml
-COPY writer/.pi/agent/models.json /root/.pi/agent/models.json
-COPY writer/.pi/agent/settings.json /root/.pi/agent/settings.json
-COPY writer/.pi/agent/auth.json /root/.pi/agent/auth.json
-COPY writer/.pi/agent/*.jsonc /root/.pi/agent/
-COPY writer/AGENTS.md /app/AGENTS.md
+COPY writer/.pi/agent/ /root/.pi/agent/
 COPY vale/ /app/vale/
 
 RUN pi extensions install || true

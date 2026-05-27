@@ -8,14 +8,25 @@ ARG AGENT_NAME
 WORKDIR /app
 
 COPY bridge.mjs .
-COPY extensions/ /app/extensions/
-COPY skills/ /app/skills/
-COPY ${AGENT_NAME}/.pi/agent/config.yml /root/.pi/agent/config.yml
-COPY ${AGENT_NAME}/.pi/agent/models.json /root/.pi/agent/models.json
-COPY ${AGENT_NAME}/.pi/agent/settings.json /root/.pi/agent/settings.json
-COPY ${AGENT_NAME}/.pi/agent/auth.json /root/.pi/agent/auth.json
-COPY ${AGENT_NAME}/.pi/agent/*.jsonc /root/.pi/agent/
-COPY ${AGENT_NAME}/AGENTS.md /app/AGENTS.md
+
+# Universal extensions (every agent)
+COPY extensions/types/ /app/extensions/types/
+COPY extensions/artifacts.ts /app/extensions/
+COPY extensions/logging.ts /app/extensions/
+COPY extensions/logging/ /app/extensions/logging/
+COPY extensions/escalate.ts /app/extensions/
+
+# CEO-specific extensions
+COPY extensions/web-search.ts /app/extensions/
+COPY extensions/triage-workflow.ts /app/extensions/
+
+# Skills (universal)
+COPY skills/_client.ts /app/skills/
+COPY skills/paperclip-tools.ts /app/skills/
+COPY skills/paperclip-skills/ /app/skills/paperclip-skills/
+
+# Agent config + templates
+COPY ${AGENT_NAME}/.pi/agent/ /root/.pi/agent/
 COPY templates/ /app/templates/
 ENV AGENT_NAME=${AGENT_NAME}
 

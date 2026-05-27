@@ -5,7 +5,7 @@ import {
   resolveCompanyId,
   resolveAgentId,
   isConfigured,
-} from "../skills/client.js";
+} from "../skills/_client.js";
 
 // ---------------------------------------------------------------------------
 // Types

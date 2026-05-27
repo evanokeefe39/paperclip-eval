@@ -1,6 +1,7 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readdirSync } from "node:fs";
 
 // --- Configuration ---
 
@@ -51,6 +52,26 @@ async function reportCostEvent(usage) {
     log("warn", "cost_report_failed", { error: err.message });
   }
 }
+
+// --- Extension autodiscovery ---
+
+function discoverExtensions() {
+  const dirs = ["/app/extensions", "/app/skills"];
+  const extensions = [];
+  for (const dir of dirs) {
+    try {
+      for (const f of readdirSync(dir)) {
+        if (f.endsWith(".ts") && !f.startsWith("_")) {
+          extensions.push(`${dir}/${f}`);
+        }
+      }
+    } catch {}
+  }
+  return extensions;
+}
+
+const discoveredExtensions = discoverExtensions();
+log("info", "extensions_discovered", { count: discoveredExtensions.length, paths: discoveredExtensions });
 
 // --- Paperclip skill discovery ---
 
@@ -190,19 +211,7 @@ const server = http.createServer(async (req, res) => {
 
   const skillArgs = PAPERCLIP_SKILLS.flatMap(name => ["--skill", `${SKILLS_DIR}/${name}`]);
 
-  const DEFAULT_EXTENSIONS = [
-    "/app/skills/paperclip-tools.ts",
-    "/app/extensions/artifacts.ts",
-    "/app/extensions/logging.ts",
-    "/app/extensions/escalate.ts",
-    "/app/extensions/web-search.ts",
-    "/app/extensions/web-fetch.ts",
-    "/app/extensions/web-scrape.ts",
-    "/app/extensions/duckdb.ts",
-    "/app/extensions/findings.ts",
-    "/app/extensions/triage-workflow.ts",
-  ];
-  const extensionArgs = DEFAULT_EXTENSIONS.flatMap(path => ["-e", path]);
+  const extensionArgs = discoveredExtensions.flatMap(path => ["-e", path]);
 
   const spawnArgs = [
     "--mode", "rpc",
