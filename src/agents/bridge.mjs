@@ -191,19 +191,18 @@ const server = http.createServer(async (req, res) => {
   const skillArgs = PAPERCLIP_SKILLS.flatMap(name => ["--skill", `${SKILLS_DIR}/${name}`]);
 
   const DEFAULT_EXTENSIONS = [
-    "/app/extensions/web-search.ts",
-    "/app/extensions/web-fetch.ts",
-    "/app/extensions/escalate.ts",
-    "/app/extensions/web-scrape.ts",
     "/app/skills/paperclip-tools.ts",
     "/app/extensions/artifacts.ts",
     "/app/extensions/logging.ts",
+    "/app/extensions/escalate.ts",
+    "/app/extensions/web-search.ts",
+    "/app/extensions/web-fetch.ts",
+    "/app/extensions/web-scrape.ts",
     "/app/extensions/duckdb.ts",
+    "/app/extensions/findings.ts",
+    "/app/extensions/triage-workflow.ts",
   ];
-  const extensions = process.env.BRIDGE_EXTENSIONS
-    ? process.env.BRIDGE_EXTENSIONS.split(",").map(s => s.trim()).filter(Boolean)
-    : DEFAULT_EXTENSIONS;
-  const extensionArgs = extensions.flatMap(path => ["-e", path]);
+  const extensionArgs = DEFAULT_EXTENSIONS.flatMap(path => ["-e", path]);
 
   const spawnArgs = [
     "--mode", "rpc",

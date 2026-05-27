@@ -30,6 +30,12 @@ src/agents/
       buffer.ts             Ring buffer for in-memory log queries
       jsonl.ts              JSONL file writer (/artifacts/{agent}/run.log.jsonl)
       otel.ts               pi-otel event bus integration (structured logs to Aspire)
+    findings.ts             Structured findings with ADMIRALTY grading (uses workproduct/)
+    triage-workflow.ts      CEO triage gate — web grounding + routing before delegation
+    workproduct/            Shared primitives for standardized work products
+      ulid.ts               Monotonic ULID generator (Crockford Base32, no deps)
+      storage.ts            JSONL append/read/update/scan, path conventions, session ID
+      validate.ts           Two-level required/encouraged field validation framework
     deep-research.ts        Multi-iteration research tool (uses deep-research/ subdir)
     deep-research/          Engine, prompts, cache, types, validators, concurrency for deep research
       config.ts             Named constants (caps, concurrency limits, content thresholds)

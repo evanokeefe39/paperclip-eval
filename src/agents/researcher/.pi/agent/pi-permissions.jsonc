@@ -1,0 +1,91 @@
+// Researcher Agent Permission Policy
+// Role: information gathering, web research, structured findings.
+// Can read/write files, use bash, search the web, scrape, write artifacts.
+// Cannot create issues, invoke agents, or make strategic decisions.
+{
+  "defaultPolicy": {
+    "tools": "deny",
+    "bash": "allow",
+    "mcp": "deny",
+    "skills": "allow",
+    "special": "allow"
+  },
+
+  "tools": {
+    "*": "deny",
+
+    // Built-in tools — full executor access
+    "read": "allow",
+    "write": "allow",
+    "edit": "allow",
+    "grep": "allow",
+    "find": "allow",
+    "ls": "allow",
+    "bash": "allow",
+
+    // Research tools
+    "web_search": "allow",
+    "web_fetch": "allow",
+    "scrape_static": "allow",
+    "scrape_stealth": "allow",
+    "scrape_apify": "allow",
+    "list_actors": "allow",
+    "scrape_status": "allow",
+
+    // Artifacts — full access
+    "write_artifact": "allow",
+    "read_artifact": "allow",
+    "list_artifacts": "allow",
+    "get_template": "allow",
+
+    // Findings
+    "record_finding": "allow",
+    "list_findings": "allow",
+    "export_findings": "allow",
+
+    // Logging
+    "log_event": "allow",
+    "get_log": "allow",
+    "get_trace_id": "allow",
+
+    // Escalation
+    "escalate": "allow",
+
+    // DuckDB
+    "duckdb_query": "allow",
+    "duckdb_import": "allow",
+
+    // Paperclip — executor subset (work on assigned issues)
+    "paperclip_me": "allow",
+    "paperclip_inbox": "allow",
+    "paperclip_list_*": "allow",
+    "paperclip_get_*": "allow",
+    "paperclip_checkout_issue": "allow",
+    "paperclip_release_issue": "allow",
+    "paperclip_update_issue": "allow",
+    "paperclip_add_comment": "allow",
+
+    // Paperclip — denied (coordination tools, not for executors)
+    "paperclip_create_issue": "deny",
+    "paperclip_invoke_agent": "deny",
+    "paperclip_suggest_tasks": "deny",
+    "paperclip_ask_user_questions": "deny",
+    "paperclip_request_confirmation": "deny",
+    "paperclip_create_approval": "deny",
+    "paperclip_approval_decision": "deny",
+    "paperclip_upsert_document": "deny",
+    "paperclip_restore_document_revision": "deny",
+    "paperclip_control_workspace_services": "deny",
+    "paperclip_wait_for_workspace_service": "deny",
+    "paperclip_get_workspace_runtime": "deny",
+    "paperclip_api_request": "deny",
+
+    // CEO-only tools (self-gated but deny as defense in depth)
+    "triage_task": "deny",
+    "advance_to_delegation": "deny"
+  },
+
+  "bash": {
+    "*": "allow"
+  }
+}

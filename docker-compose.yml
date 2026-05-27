@@ -59,8 +59,7 @@ services:
       - .env
       - src/agents/ceo/.env
     environment:
-      BRIDGE_EXTENSIONS: "/app/skills/paperclip-tools.ts,/app/extensions/artifacts.ts,/app/extensions/logging.ts,/app/extensions/escalate.ts,/app/extensions/web-search.ts,/app/extensions/role-guard.ts"
-      BLOCKED_TOOLS: "bash,edit,write,write_artifact,get_template,paperclip_checkout_issue,paperclip_release_issue,paperclip_upsert_document,paperclip_restore_document_revision,paperclip_control_workspace_services,paperclip_wait_for_workspace_service,paperclip_api_request"
+      BRIDGE_TIMEOUT_MS: "300000"
     volumes:
       - ceo-workspace:/workspace
       - ./artifacts:/artifacts
@@ -80,6 +79,7 @@ services:
       - src/agents/researcher/.env
     environment:
       NVIDIA_NIM_API_KEY: "${NVIDIA_NIM_API_KEY}"
+      FINDING_STYLE: "intelligence"
     volumes:
       - researcher-workspace:/workspace
       - ./artifacts:/artifacts
@@ -100,6 +100,7 @@ services:
     environment:
       GROQ_API_KEY: "${GROQ_API_KEY}"
       NVIDIA_NIM_API_KEY: "${NVIDIA_NIM_API_KEY}"
+      FINDING_STYLE: "data"
     deploy:
       resources:
         limits:

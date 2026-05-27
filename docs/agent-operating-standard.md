@@ -146,6 +146,30 @@ After a QA rejection:
 
 **Concrete requirements are detailed in Part 2 (Workspace Structure) and Part 4 (Templates).**
 
+#### 1.4.1 Standardized Work Products
+
+Beyond templates, agents produce standardized work products: structured, schema-validated, machine-queryable records with provenance metadata. Where templates govern document formatting, work products govern the atomic units of agent output that flow through the pipeline.
+
+Work products are the standardized work of TPS applied to agent output. They enforce:
+
+- **Uniform structure** — every instance of a work product type conforms to the same TypeBox schema, regardless of which agent produced it or which style was applied. Deviation from schema is impossible (the tool rejects malformed input).
+- **Provenance by default** — every record carries agent identity, session ID, timestamp, and a monotonic ULID. Cross-agent traceability is built in.
+- **Style-based validation** — different contexts demand different rigor. An intelligence-style finding requires ADMIRALTY grading; a general-style finding requires only a date. The validation framework enforces the right standard for the declared context without requiring agents to remember the rules.
+- **Two-level quality control** — required fields are hard gates (tool rejects), encouraged fields are soft signals (tool warns). This prevents the worst form of waste: agents hallucinating metadata to pass strict validation. Honest gaps are always preferable to fabricated completeness.
+- **Cross-agent queryability** — any agent can search and retrieve work products from any other agent's namespace. The CEO can query all findings. The Writer can retrieve specific findings by ULID. QA can filter by reliability grade. This replaces unstructured artifact passing with indexed, filterable records.
+
+**Current work products:**
+
+| Product | Extension | Producing Agents | Consuming Agents |
+|---------|-----------|-----------------|-----------------|
+| Finding | `findings.ts` | Researcher, Data | Writer, CEO, QA |
+
+**Pattern for new work products:**
+
+Every standardized work product extension imports shared primitives from `extensions/workproduct/` (ULID generation, JSONL storage, two-level validation) and defines its own schemas, style profiles, domain logic, and tools. See architecture.md Extension Architecture section for the technical pattern.
+
+The decision to standardize a work product — versus leaving it as freeform artifact content — should be driven by whether downstream agents need to query, filter, or grade instances of that product. If an output is consumed as a whole document (a research report, a content draft), it stays as a template-governed artifact. If individual claims, data points, assessments, or verdicts within the output need to be individually addressable, queryable, and gradable, it becomes a standardized work product.
+
 ---
 
 ### 1.5 Heijunka — Level the Workload

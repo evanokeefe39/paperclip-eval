@@ -45,10 +45,10 @@ export default function (pi: ExtensionAPI) {
     async (event: { toolName: string; toolCallId: string; input: Record<string, unknown> }) => {
       if (BLOCKED_TOOLS.includes(event.toolName)) {
         logAttempt(event.toolName, event.input);
-        return {
-          block: true,
-          reason: `Tool "${event.toolName}" is not available for the ${AGENT_NAME} agent. Delegate this work to the appropriate agent instead.`,
-        };
+        const reason = event.toolName === "subagent"
+          ? `The "subagent" tool is not available. To delegate work, use paperclip_create_issue to create a child issue assigned to an agent, then paperclip_invoke_agent to wake them.`
+          : `Tool "${event.toolName}" is not available for the ${AGENT_NAME} agent. Delegate this work to the appropriate agent instead.`;
+        return { block: true, reason };
       }
     }
   );

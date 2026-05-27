@@ -21,10 +21,11 @@ COPY researcher/.pi/agent/config.yml /root/.pi/agent/config.yml
 COPY researcher/.pi/agent/models.json /root/.pi/agent/models.json
 COPY researcher/.pi/agent/settings.json /root/.pi/agent/settings.json
 COPY researcher/.pi/agent/auth.json /root/.pi/agent/auth.json
+COPY researcher/.pi/agent/*.jsonc /root/.pi/agent/
 COPY researcher/AGENTS.md /app/AGENTS.md
 COPY researcher/scripts/ /app/scripts/
 
-RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents npm:pi-otel || true
+RUN pi extensions install || true
 
 RUN mkdir -p /workspace
 

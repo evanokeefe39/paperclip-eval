@@ -146,6 +146,40 @@ The Paperclip behavioral skills exist for the same reason — local adapters get
 
 Extensions can import from relative paths (e.g., `paperclip-tools.ts` imports from `./client.js`). Pi resolves these at load time. Cross-directory imports also work (e.g., `escalate.ts` imports from `../skills/client.js`).
 
+### Standardized Work Products (workproduct/)
+
+Agents produce structured, validated work products as their primary output. Findings was the first; future examples include assessments, briefs, verdicts, or any agent output that benefits from schema enforcement, provenance tracking, and cross-agent querying.
+
+Shared primitives live in `extensions/workproduct/`:
+
+```
+extensions/workproduct/
+  ulid.ts       Monotonic ULID generator (Crockford Base32, no deps)
+  storage.ts    JSONL append/read/update, cross-agent scan, path conventions, session ID
+  validate.ts   Two-level required/encouraged field validation framework
+```
+
+Each work product is a standalone extension that imports from `workproduct/` and defines its own:
+
+- **TypeBox schemas** — source of truth for the product's data model
+- **Style profiles** — per-style required/encouraged field sets (using `StyleProfiles` from `validate.ts`)
+- **Domain logic** — product-specific inference, grading, or transformation
+- **Tools** — record, query, get, and any product-specific operations
+- **Prompt snippets** — per-style context injected into the agent's system prompt
+
+Storage convention: `/artifacts/{agent}/{product-type}/{session-id}.jsonl`. Every record gets a ULID, a session ID, and an agent name. Cross-agent retrieval uses `scanAllAgents()` from `storage.ts`.
+
+Validation is two-level: required field absence is a hard error (tool rejects the call), encouraged field absence is a warning (tool records the product with warnings returned to the agent). This prevents agents from hallucinating metadata to satisfy strict requirements — a product with honest gaps is better than one with fabricated fields.
+
+To add a new work product:
+
+1. Create `extensions/{product}.ts`
+2. Import `ulid`, storage helpers, and `validateByStyle` from `workproduct/`
+3. Define TypeBox schemas for the product's data model
+4. Define `StyleProfiles` with required/encouraged fields per style
+5. Register tools: record, query, get, and any product-specific operations
+6. Load via `-e` flag in bridge.mjs for relevant agents
+
 ### Escalate Extension (v2)
 
 The `escalate.ts` extension registers a single `escalate` tool that presents a uniform interface to agents regardless of the notification backend. Backend selection is automatic based on environment:

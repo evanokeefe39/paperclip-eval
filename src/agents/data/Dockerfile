@@ -39,10 +39,11 @@ COPY data/.pi/agent/config.yml /root/.pi/agent/config.yml
 COPY data/.pi/agent/models.json /root/.pi/agent/models.json
 COPY data/.pi/agent/settings.json /root/.pi/agent/settings.json
 COPY data/.pi/agent/auth.json /root/.pi/agent/auth.json
+COPY data/.pi/agent/*.jsonc /root/.pi/agent/
 COPY data/AGENTS.md /app/AGENTS.md
 COPY data/scripts/ /app/scripts/
 
-RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents npm:pi-otel || true
+RUN pi extensions install || true
 
 RUN touch /app/.browsers-installed
 RUN mkdir -p /workspace

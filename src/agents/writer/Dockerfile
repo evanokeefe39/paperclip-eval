@@ -21,10 +21,11 @@ COPY writer/.pi/agent/config.yml /root/.pi/agent/config.yml
 COPY writer/.pi/agent/models.json /root/.pi/agent/models.json
 COPY writer/.pi/agent/settings.json /root/.pi/agent/settings.json
 COPY writer/.pi/agent/auth.json /root/.pi/agent/auth.json
+COPY writer/.pi/agent/*.jsonc /root/.pi/agent/
 COPY writer/AGENTS.md /app/AGENTS.md
 COPY vale/ /app/vale/
 
-RUN pi extensions install npm:shitty-extensions npm:@ifi/pi-extension-subagents npm:pi-otel || true
+RUN pi extensions install || true
 
 RUN mkdir -p /workspace
 

@@ -2,7 +2,8 @@
   "packages": [
     "npm:shitty-extensions",
     "npm:@ifi/pi-extension-subagents",
-    "npm:pi-otel"
+    "npm:pi-otel",
+    "npm:pi-permission-system"
   ],
   "terminal": {
     "showTerminalProgress": true
