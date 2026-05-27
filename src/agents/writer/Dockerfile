@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
-RUN curl -sfL https://github.com/errata-ai/vale/releases/download/v3.11.2/vale_3.11.2_Linux_64-bit.tar.gz | tar xz -C /usr/local/bin vale
+RUN curl -sfL --retry 3 --retry-delay 2 -o /tmp/vale.tar.gz https://github.com/errata-ai/vale/releases/download/v3.11.2/vale_3.11.2_Linux_64-bit.tar.gz && tar xzf /tmp/vale.tar.gz -C /usr/local/bin vale && rm /tmp/vale.tar.gz
 
 ENV NODE_PATH=/usr/local/lib/node_modules
 

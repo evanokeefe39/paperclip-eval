@@ -2,6 +2,7 @@ FROM node:22-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    ffmpeg \
     python3 \
     python3-pip \
     libnss3 \

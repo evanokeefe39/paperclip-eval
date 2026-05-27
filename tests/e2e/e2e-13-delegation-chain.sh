@@ -216,10 +216,10 @@ echo ""
 begin_test "Researcher produced artifact files"
 # Copy artifacts from researcher container
 RES_CTR="$(ctr_name researcher)"
-docker cp "$RES_CTR:$ARTIFACTS_DIR/." "$RESULTS_DIR/" 2>/dev/null || true
+docker cp "$RES_CTR:$ARTIFACTS_DIR/." "$RESULTS_DIR/" 2>/dev/null || true || true
 # Also check CEO container (artifacts volume is shared)
 CEO_CTR="$(ctr_name ceo)"
-docker cp "$CEO_CTR:$ARTIFACTS_DIR/." "$RESULTS_DIR/" 2>/dev/null || true
+docker cp "$CEO_CTR:$ARTIFACTS_DIR/." "$RESULTS_DIR/" 2>/dev/null || true || true
 
 ARTIFACT_COUNT=$(ls -1 "$RESULTS_DIR"/*.md 2>/dev/null | wc -l)
 if [ "$ARTIFACT_COUNT" -gt 0 ]; then

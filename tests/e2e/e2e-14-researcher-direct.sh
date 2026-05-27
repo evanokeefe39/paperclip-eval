@@ -110,7 +110,7 @@ Write findings to $ARTIFACTS_DIR/instagram-channels.md as a structured markdown 
 Target: 10 channels. Minimum acceptable: 5."
 
 if invoke_http_adapter "$RESEARCHER_URL" "$IG_TASK" "$RUN_ID-ig"; then
-    docker cp "$RES_CTR:$ARTIFACTS_DIR/instagram-channels.md" "$RESULTS_DIR/instagram-channels.md" 2>/dev/null
+    docker cp "$RES_CTR:$ARTIFACTS_DIR/instagram-channels.md" "$RESULTS_DIR/instagram-channels.md" 2>/dev/null || true
     if [ -f "$RESULTS_DIR/instagram-channels.md" ]; then
         BYTES=$(wc -c < "$RESULTS_DIR/instagram-channels.md")
         echo "  Saved: instagram-channels.md ($BYTES bytes)"
@@ -119,7 +119,7 @@ if invoke_http_adapter "$RESEARCHER_URL" "$IG_TASK" "$RUN_ID-ig"; then
         fail "agent returned 200 but no artifact written"
     fi
 else
-    docker cp "$RES_CTR:$ARTIFACTS_DIR/instagram-channels.md" "$RESULTS_DIR/instagram-channels.md" 2>/dev/null
+    docker cp "$RES_CTR:$ARTIFACTS_DIR/instagram-channels.md" "$RESULTS_DIR/instagram-channels.md" 2>/dev/null || true
     if [ -f "$RESULTS_DIR/instagram-channels.md" ]; then
         echo "  Timed out but artifact exists — partial success"
         pass
@@ -163,7 +163,7 @@ Write findings to $ARTIFACTS_DIR/tiktok-channels.md as a structured markdown doc
 Target: 10 channels. Minimum acceptable: 5."
 
 if invoke_http_adapter "$RESEARCHER_URL" "$TT_TASK" "$RUN_ID-tt"; then
-    docker cp "$RES_CTR:$ARTIFACTS_DIR/tiktok-channels.md" "$RESULTS_DIR/tiktok-channels.md" 2>/dev/null
+    docker cp "$RES_CTR:$ARTIFACTS_DIR/tiktok-channels.md" "$RESULTS_DIR/tiktok-channels.md" 2>/dev/null || true
     if [ -f "$RESULTS_DIR/tiktok-channels.md" ]; then
         BYTES=$(wc -c < "$RESULTS_DIR/tiktok-channels.md")
         echo "  Saved: tiktok-channels.md ($BYTES bytes)"
@@ -172,7 +172,7 @@ if invoke_http_adapter "$RESEARCHER_URL" "$TT_TASK" "$RUN_ID-tt"; then
         fail "agent returned 200 but no artifact written"
     fi
 else
-    docker cp "$RES_CTR:$ARTIFACTS_DIR/tiktok-channels.md" "$RESULTS_DIR/tiktok-channels.md" 2>/dev/null
+    docker cp "$RES_CTR:$ARTIFACTS_DIR/tiktok-channels.md" "$RESULTS_DIR/tiktok-channels.md" 2>/dev/null || true
     if [ -f "$RESULTS_DIR/tiktok-channels.md" ]; then
         echo "  Timed out but artifact exists — partial success"
         pass
