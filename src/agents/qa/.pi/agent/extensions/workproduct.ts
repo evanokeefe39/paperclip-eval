@@ -1,7 +1,9 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 
-import * as client from "./artifact-client.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { ulid } from "./workproduct-lib/ulid.js";
 import { validateByStyle, type StyleProfiles } from "./workproduct-lib/validate.js";
 
 // ---------------------------------------------------------------------------
@@ -38,6 +40,65 @@ const KIND_PROFILES: StyleProfiles = {
 };
 
 // ---------------------------------------------------------------------------
+// Local filesystem storage helpers
+// ---------------------------------------------------------------------------
+
+const AGENT_NAME = process.env.AGENT_NAME || "unknown";
+
+interface LocalRecord {
+  id: string;
+  agent: string;
+  type: string;
+  filename: string;
+  timestamp: string;
+  content: string;
+  metadata: Record<string, unknown>;
+}
+
+function writeLocal(subdir: string, type: string, filename: string, content: string, metadata: Record<string, unknown>): { id: string } {
+  const dir = path.join(process.cwd(), "workproduct", subdir);
+  fs.mkdirSync(dir, { recursive: true });
+  const id = ulid();
+  const record: LocalRecord = {
+    id,
+    agent: AGENT_NAME,
+    type,
+    filename,
+    timestamp: new Date().toISOString(),
+    content,
+    metadata,
+  };
+  fs.writeFileSync(path.join(dir, `${id}-${type}.json`), JSON.stringify(record, null, 2));
+  return { id };
+}
+
+function readLocal(subdir: string, id: string): LocalRecord | null {
+  const dir = path.join(process.cwd(), "workproduct", subdir);
+  if (!fs.existsSync(dir)) return null;
+  const files = fs.readdirSync(dir);
+  const match = files.find(f => f.startsWith(id));
+  if (!match) return null;
+  return JSON.parse(fs.readFileSync(path.join(dir, match), "utf8"));
+}
+
+function listLocal(subdir: string, filters?: { type?: string; session_id?: string; since?: string }): LocalRecord[] {
+  const dir = path.join(process.cwd(), "workproduct", subdir);
+  if (!fs.existsSync(dir)) return [];
+  const files = fs.readdirSync(dir).filter(f => f.endsWith(".json"));
+  const records: LocalRecord[] = [];
+  for (const f of files) {
+    try {
+      const rec = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as LocalRecord;
+      if (filters?.type && rec.type !== filters.type) continue;
+      if (filters?.session_id && rec.metadata.session_id !== filters.session_id) continue;
+      if (filters?.since && rec.timestamp < filters.since) continue;
+      records.push(rec);
+    } catch { /* skip corrupt files */ }
+  }
+  return records.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -48,9 +109,9 @@ function getSessionId(): string {
 const ASSESSMENT_KINDS = ["artifact_review", "plan_review", "stage_gate"] as const;
 type AssessmentKind = typeof ASSESSMENT_KINDS[number];
 
-function formatLine(rec: client.ArtifactRecord): string {
+function formatLine(rec: LocalRecord): string {
   const m = rec.metadata as Record<string, any>;
-  const kind = rec.artifact_type;
+  const kind = rec.type;
   const verdict = m.verdict || "—";
   let ctx = "";
   if (kind === "artifact_review") {
@@ -68,11 +129,10 @@ function formatLine(rec: client.ArtifactRecord): string {
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
-  const agentName = client.getAgentName();
-  if (agentName !== "qa") {
-    if (agentName) {
+  if (AGENT_NAME !== "qa") {
+    if (AGENT_NAME) {
       console.warn(
-        `[workproduct] qa extension loaded in wrong agent: ${agentName}`,
+        `[workproduct] qa extension loaded in wrong agent: ${AGENT_NAME}`,
       );
     }
     return;
@@ -151,26 +211,18 @@ export default function (pi: ExtensionAPI) {
         const content =
           `${params.verdict_text}\n\n## Findings\n${JSON.stringify(findings, null, 2)}`;
 
-        const result = await client.write({
-          type: "artifact_review",
-          bucket: "artifacts",
-          filename: "artifact_review.md",
-          mime: "text/markdown",
-          content,
-          metadata: {
-            verdict: params.verdict,
-            artifact_under_review: params.artifact_under_review,
-            producing_agent: params.producing_agent,
-            source_issue: params.source_issue,
-            output_template: params.output_template,
-            standards_applied: params.standards_applied,
-            checklist: params.checklist,
-            metrics: params.metrics,
-            findings,
-            brief_ref: params.brief_ref || undefined,
-            session_id: sessionId,
-          },
-          run_id: sessionId,
+        const result = writeLocal("assessments", "artifact_review", "artifact_review.md", content, {
+          verdict: params.verdict,
+          artifact_under_review: params.artifact_under_review,
+          producing_agent: params.producing_agent,
+          source_issue: params.source_issue,
+          output_template: params.output_template,
+          standards_applied: params.standards_applied,
+          checklist: params.checklist,
+          metrics: params.metrics,
+          findings,
+          brief_ref: params.brief_ref || undefined,
+          session_id: sessionId,
         });
 
         const parts = [
@@ -265,24 +317,16 @@ export default function (pi: ExtensionAPI) {
         const content =
           `${params.review_text}\n\n## Risks\n${JSON.stringify(params.risk_inventory, null, 2)}`;
 
-        const result = await client.write({
-          type: "plan_review",
-          bucket: "artifacts",
-          filename: "plan_review.md",
-          mime: "text/markdown",
-          content,
-          metadata: {
-            verdict: params.verdict,
-            plan_under_review: params.plan_under_review,
-            gate_checklist: params.gate_checklist,
-            risk_inventory: params.risk_inventory,
-            feasibility_score: params.feasibility_score || undefined,
-            unresolved_questions: params.unresolved_questions || [],
-            conditions: params.conditions || [],
-            source_issue: params.source_issue || undefined,
-            session_id: sessionId,
-          },
-          run_id: sessionId,
+        const result = writeLocal("assessments", "plan_review", "plan_review.md", content, {
+          verdict: params.verdict,
+          plan_under_review: params.plan_under_review,
+          gate_checklist: params.gate_checklist,
+          risk_inventory: params.risk_inventory,
+          feasibility_score: params.feasibility_score || undefined,
+          unresolved_questions: params.unresolved_questions || [],
+          conditions: params.conditions || [],
+          source_issue: params.source_issue || undefined,
+          session_id: sessionId,
         });
 
         const parts = [
@@ -369,25 +413,17 @@ export default function (pi: ExtensionAPI) {
         const content =
           `${params.gate_text}\n\n## Blocking issues\n${JSON.stringify(blocking, null, 2)}`;
 
-        const result = await client.write({
-          type: "stage_gate",
-          bucket: "artifacts",
-          filename: "stage_gate.md",
-          mime: "text/markdown",
-          content,
-          metadata: {
-            verdict: params.verdict,
-            from_stage: params.from_stage,
-            to_stage: params.to_stage,
-            inputs: params.inputs,
-            gate_criteria: params.gate_criteria,
-            blocking_issues: blocking,
-            conditions: params.conditions || [],
-            source_issue: params.source_issue || undefined,
-            prior_gate_ref: params.prior_gate_ref || undefined,
-            session_id: sessionId,
-          },
-          run_id: sessionId,
+        const result = writeLocal("assessments", "stage_gate", "stage_gate.md", content, {
+          verdict: params.verdict,
+          from_stage: params.from_stage,
+          to_stage: params.to_stage,
+          inputs: params.inputs,
+          gate_criteria: params.gate_criteria,
+          blocking_issues: blocking,
+          conditions: params.conditions || [],
+          source_issue: params.source_issue || undefined,
+          prior_gate_ref: params.prior_gate_ref || undefined,
+          session_id: sessionId,
         });
 
         const parts = [
@@ -451,47 +487,39 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId: string, params: Record<string, any>, _signal?: AbortSignal) {
       try {
-        const targetAgent: string = params.agent || agentName;
         const kindsToFetch: AssessmentKind[] = params.kind
           ? [params.kind as AssessmentKind]
           : [...ASSESSMENT_KINDS];
 
-        const baseMetaFilter: Record<string, unknown> = {};
-        if (params.session_id) baseMetaFilter.session_id = params.session_id;
-
-        const fetched = await Promise.all(
-          kindsToFetch.map(kind =>
-            client.list({
-              type: kind,
-              agent: targetAgent,
-              since: params.since,
-              metadata:
-                Object.keys(baseMetaFilter).length > 0 ? baseMetaFilter : undefined,
-            }),
-          ),
+        const allRecords: LocalRecord[] = kindsToFetch.flatMap(kind =>
+          listLocal("assessments", {
+            type: kind,
+            session_id: params.session_id,
+            since: params.since,
+          }),
         );
 
-        let records: client.ArtifactRecord[] = fetched.flat();
+        let records = allRecords;
 
-        // Post-filters that can't be expressed in client.list metadata equality.
+        // Post-filters that can't be expressed in listLocal filters.
         if (params.verdict) {
           records = records.filter(r => (r.metadata as any).verdict === params.verdict);
         }
         if (params.producing_agent) {
           records = records.filter(r =>
-            r.artifact_type === "artifact_review" &&
+            r.type === "artifact_review" &&
             (r.metadata as any).producing_agent === params.producing_agent,
           );
         }
         if (params.from_stage) {
           records = records.filter(r =>
-            r.artifact_type === "stage_gate" &&
+            r.type === "stage_gate" &&
             (r.metadata as any).from_stage === params.from_stage,
           );
         }
         if (params.to_stage) {
           records = records.filter(r =>
-            r.artifact_type === "stage_gate" &&
+            r.type === "stage_gate" &&
             (r.metadata as any).to_stage === params.to_stage,
           );
         }
@@ -499,7 +527,7 @@ export default function (pi: ExtensionAPI) {
           records = records.filter(r => (r.metadata as any).source_issue === params.source_issue);
         }
 
-        records.sort((a, b) => b.created_at.localeCompare(a.created_at));
+        records.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 
         const limit = params.limit || 50;
         records = records.slice(0, limit);
@@ -537,30 +565,34 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId: string, params: Record<string, any>, _signal?: AbortSignal) {
       try {
-        const { content: rawContent, metadata: rec } = await client.read(params.id);
+        const rec = readLocal("assessments", params.id);
+        if (!rec) {
+          return {
+            content: [{ type: "text" as const, text: `Error: artifact ${params.id} not found` }],
+          };
+        }
 
-        if (!(ASSESSMENT_KINDS as readonly string[]).includes(rec.artifact_type)) {
+        if (!(ASSESSMENT_KINDS as readonly string[]).includes(rec.type)) {
           return {
             content: [{
               type: "text" as const,
-              text: `Error: artifact ${params.id} has type '${rec.artifact_type}', which is not a QA assessment`,
+              text: `Error: artifact ${params.id} has type '${rec.type}', which is not a QA assessment`,
             }],
           };
         }
 
-        const text = rawContent.toString("utf8");
         const payload = {
           id: rec.id,
-          kind: rec.artifact_type,
-          agent: rec.agent_name,
-          created_at: rec.created_at,
+          kind: rec.type,
+          agent: rec.agent,
+          created_at: rec.timestamp,
           metadata: rec.metadata,
-          content: text,
+          content: rec.content,
         };
 
         return {
           content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
-          details: { id: rec.id, kind: rec.artifact_type },
+          details: { id: rec.id, kind: rec.type },
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

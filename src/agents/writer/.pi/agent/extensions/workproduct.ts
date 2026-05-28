@@ -1,7 +1,9 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 
-import * as client from "./artifact-client.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { ulid } from "./workproduct-lib/ulid.js";
 import { validateByStyle, type StyleProfiles } from "./workproduct-lib/validate.js";
 
 // ---------------------------------------------------------------------------
@@ -47,6 +49,65 @@ const KIND_PROFILES: StyleProfiles = {
 const WRITER_KINDS = ["report", "guide", "article", "marketing_copy", "newsletter"] as const;
 
 // ---------------------------------------------------------------------------
+// Local filesystem storage helpers
+// ---------------------------------------------------------------------------
+
+const AGENT_NAME = process.env.AGENT_NAME || "unknown";
+
+interface LocalRecord {
+  id: string;
+  agent: string;
+  type: string;
+  filename: string;
+  timestamp: string;
+  content: string;
+  metadata: Record<string, unknown>;
+}
+
+function writeLocal(subdir: string, type: string, filename: string, content: string, metadata: Record<string, unknown>): { id: string } {
+  const dir = path.join(process.cwd(), "workproduct", subdir);
+  fs.mkdirSync(dir, { recursive: true });
+  const id = ulid();
+  const record: LocalRecord = {
+    id,
+    agent: AGENT_NAME,
+    type,
+    filename,
+    timestamp: new Date().toISOString(),
+    content,
+    metadata,
+  };
+  fs.writeFileSync(path.join(dir, `${id}-${type}.json`), JSON.stringify(record, null, 2));
+  return { id };
+}
+
+function readLocal(subdir: string, id: string): LocalRecord | null {
+  const dir = path.join(process.cwd(), "workproduct", subdir);
+  if (!fs.existsSync(dir)) return null;
+  const files = fs.readdirSync(dir);
+  const match = files.find(f => f.startsWith(id));
+  if (!match) return null;
+  return JSON.parse(fs.readFileSync(path.join(dir, match), "utf8"));
+}
+
+function listLocal(subdir: string, filters?: { type?: string; session_id?: string; since?: string }): LocalRecord[] {
+  const dir = path.join(process.cwd(), "workproduct", subdir);
+  if (!fs.existsSync(dir)) return [];
+  const files = fs.readdirSync(dir).filter(f => f.endsWith(".json"));
+  const records: LocalRecord[] = [];
+  for (const f of files) {
+    try {
+      const rec = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as LocalRecord;
+      if (filters?.type && rec.type !== filters.type) continue;
+      if (filters?.session_id && rec.metadata.session_id !== filters.session_id) continue;
+      if (filters?.since && rec.timestamp < filters.since) continue;
+      records.push(rec);
+    } catch { /* skip corrupt files */ }
+  }
+  return records.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -67,11 +128,10 @@ function previewTitle(title: string): string {
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
-  const agentName = client.getAgentName();
-  if (agentName !== "writer") {
-    if (agentName) {
+  if (AGENT_NAME !== "writer") {
+    if (AGENT_NAME) {
       console.warn(
-        `[workproduct] writer extension loaded in wrong agent: ${agentName}`,
+        `[workproduct] writer extension loaded in wrong agent: ${AGENT_NAME}`,
       );
     }
     return;
@@ -133,15 +193,7 @@ export default function (pi: ExtensionAPI) {
           session_id: sessionId,
         };
 
-        const result = await client.write({
-          type: "report",
-          bucket: "artifacts",
-          filename: "report.md",
-          mime: "text/markdown",
-          content: params.content,
-          metadata,
-          run_id: sessionId,
-        });
+        const result = writeLocal("content", "report", "report.md", params.content, metadata);
 
         const parts = [
           `Report recorded: ${result.id}`,
@@ -216,15 +268,7 @@ export default function (pi: ExtensionAPI) {
           session_id: sessionId,
         };
 
-        const result = await client.write({
-          type: "guide",
-          bucket: "artifacts",
-          filename: "guide.md",
-          mime: "text/markdown",
-          content: params.content,
-          metadata,
-          run_id: sessionId,
-        });
+        const result = writeLocal("content", "guide", "guide.md", params.content, metadata);
 
         const parts = [
           `Guide recorded: ${result.id}`,
@@ -294,15 +338,7 @@ export default function (pi: ExtensionAPI) {
           session_id: sessionId,
         };
 
-        const result = await client.write({
-          type: "article",
-          bucket: "artifacts",
-          filename: "article.md",
-          mime: "text/markdown",
-          content: params.content,
-          metadata,
-          run_id: sessionId,
-        });
+        const result = writeLocal("content", "article", "article.md", params.content, metadata);
 
         const parts = [
           `Article recorded: ${result.id}`,
@@ -374,15 +410,7 @@ export default function (pi: ExtensionAPI) {
           session_id: sessionId,
         };
 
-        const result = await client.write({
-          type: "marketing_copy",
-          bucket: "artifacts",
-          filename: "marketing_copy.md",
-          mime: "text/markdown",
-          content: params.content,
-          metadata,
-          run_id: sessionId,
-        });
+        const result = writeLocal("content", "marketing_copy", "marketing_copy.md", params.content, metadata);
 
         const parts = [
           `Marketing copy recorded: ${result.id}`,
@@ -458,15 +486,7 @@ export default function (pi: ExtensionAPI) {
           session_id: sessionId,
         };
 
-        const result = await client.write({
-          type: "newsletter",
-          bucket: "artifacts",
-          filename: "newsletter.md",
-          mime: "text/markdown",
-          content: params.content,
-          metadata,
-          run_id: sessionId,
-        });
+        const result = writeLocal("content", "newsletter", "newsletter.md", params.content, metadata);
 
         const parts = [
           `Newsletter recorded: ${result.id}`,
@@ -506,29 +526,18 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId: string, params: Record<string, any>, _signal?: AbortSignal) {
       try {
-        const targetAgent = params.agent || agentName;
-        const metadataFilter: Record<string, unknown> = {};
-        if (params.session_id) metadataFilter.session_id = params.session_id;
-        const metaArg = Object.keys(metadataFilter).length > 0 ? metadataFilter : undefined;
-
-        let allRecords: client.ArtifactRecord[];
+        let allRecords: LocalRecord[];
         if (params.kind) {
-          allRecords = await client.list({
+          allRecords = listLocal("content", {
             type: params.kind,
-            agent: targetAgent,
+            session_id: params.session_id,
             since: params.since,
-            metadata: metaArg,
           });
         } else {
-          const lists = await Promise.all(
-            WRITER_KINDS.map(k => client.list({
-              type: k,
-              agent: targetAgent,
-              since: params.since,
-              metadata: metaArg,
-            })),
-          );
-          allRecords = lists.flat();
+          allRecords = listLocal("content", {
+            session_id: params.session_id,
+            since: params.since,
+          });
         }
 
         let items = allRecords.map(rec => ({ rec, m: rec.metadata as Record<string, any> }));
@@ -548,7 +557,7 @@ export default function (pi: ExtensionAPI) {
           });
         }
 
-        items.sort((a, b) => b.rec.created_at.localeCompare(a.rec.created_at));
+        items.sort((a, b) => b.rec.timestamp.localeCompare(a.rec.timestamp));
 
         const limit = params.limit || 50;
         items = items.slice(0, limit);
@@ -565,7 +574,7 @@ export default function (pi: ExtensionAPI) {
           const title = m.title_preview || m.title || "(untitled)";
           const audience = m.audience || "—";
           const words = m.word_count ?? 0;
-          lines.push(`[${rec.id}] ${rec.artifact_type} | ${title} | ${audience} | words=${words}`);
+          lines.push(`[${rec.id}] ${rec.type} | ${title} | ${audience} | words=${words}`);
         }
 
         return {
@@ -589,29 +598,33 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId: string, params: Record<string, any>, _signal?: AbortSignal) {
       try {
-        const { content: rawContent, metadata: rec } = await client.read(params.id);
-        if (!(WRITER_KINDS as readonly string[]).includes(rec.artifact_type)) {
+        const rec = readLocal("content", params.id);
+        if (!rec) {
+          return {
+            content: [{ type: "text" as const, text: `Error: artifact ${params.id} not found` }],
+          };
+        }
+        if (!(WRITER_KINDS as readonly string[]).includes(rec.type)) {
           return {
             content: [{
               type: "text" as const,
-              text: `Error: artifact ${params.id} is not writer content (type=${rec.artifact_type})`,
+              text: `Error: artifact ${params.id} is not writer content (type=${rec.type})`,
             }],
           };
         }
 
-        const body = rawContent.toString("utf8");
         const payload = {
           id: rec.id,
-          kind: rec.artifact_type,
-          agent: rec.agent_name,
-          created_at: rec.created_at,
+          kind: rec.type,
+          agent: rec.agent,
+          created_at: rec.timestamp,
           metadata: rec.metadata,
-          content: body,
+          content: rec.content,
         };
 
         return {
           content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
-          details: { id: rec.id, kind: rec.artifact_type },
+          details: { id: rec.id, kind: rec.type },
         };
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
