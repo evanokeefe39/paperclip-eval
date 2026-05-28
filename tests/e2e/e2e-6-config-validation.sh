@@ -186,20 +186,13 @@ else
     pass
 fi
 
-# --- Validate bridge.mjs references correct extension paths ---
-begin_test "bridge.mjs references all extension files"
-BRIDGE="$AGENTS_DIR/bridge.mjs"
-if [ ! -f "$BRIDGE" ]; then
-    fail "bridge.mjs not found"
+# --- Validate server.mjs exists ---
+begin_test "server.mjs exists"
+SERVER="$AGENTS_DIR/server.mjs"
+if [ ! -f "$SERVER" ]; then
+    fail "server.mjs not found"
 else
-    MISSING_REF=""
-    grep -q "web-search.ts" "$BRIDGE" || MISSING_REF="$MISSING_REF web-search.ts"
-    grep -q "web-fetch.ts" "$BRIDGE" || MISSING_REF="$MISSING_REF web-fetch.ts"
-    if [ -n "$MISSING_REF" ]; then
-        fail "bridge.mjs missing -e refs:$MISSING_REF"
-    else
-        pass
-    fi
+    pass
 fi
 
 # --- Validate Dockerfile copies extensions ---
@@ -250,56 +243,33 @@ for agent in "${ALL_AGENTS[@]}"; do
     fi
 done
 
-# --- Validate CEO has restricted extensions in docker-compose ---
-begin_test "docker-compose CEO service has BRIDGE_EXTENSIONS override"
-COMPOSE="$REPO_ROOT/docker-compose.yml"
-if grep -A 20 "^  ceo:" "$COMPOSE" | grep -q "BRIDGE_EXTENSIONS"; then
+# --- Validate CEO has pi-permissions.jsonc ---
+begin_test "CEO has pi-permissions.jsonc for tool access control"
+CEO_PERMS="$AGENTS_DIR/ceo/.pi/agent/pi-permissions.jsonc"
+if [ -f "$CEO_PERMS" ]; then
     pass
 else
-    fail "CEO service missing BRIDGE_EXTENSIONS — will load all work tools"
+    fail "CEO missing pi-permissions.jsonc — no tool access control"
 fi
 
-begin_test "CEO BRIDGE_EXTENSIONS excludes work tools"
-CEO_EXT=$(grep -A 20 "^  ceo:" "$COMPOSE" | grep "BRIDGE_EXTENSIONS" | head -1)
-WORK_TOOLS_FOUND=""
-echo "$CEO_EXT" | grep -q "web-search" && WORK_TOOLS_FOUND="$WORK_TOOLS_FOUND web-search"
-echo "$CEO_EXT" | grep -q "web-fetch" && WORK_TOOLS_FOUND="$WORK_TOOLS_FOUND web-fetch"
-echo "$CEO_EXT" | grep -q "web-scrape" && WORK_TOOLS_FOUND="$WORK_TOOLS_FOUND web-scrape"
-echo "$CEO_EXT" | grep -q "duckdb" && WORK_TOOLS_FOUND="$WORK_TOOLS_FOUND duckdb"
-if [ -n "$WORK_TOOLS_FOUND" ]; then
-    fail "CEO has work tools:$WORK_TOOLS_FOUND"
-else
-    pass
-fi
-
-begin_test "CEO BRIDGE_EXTENSIONS includes coordination tools"
-MISSING_COORD=""
-echo "$CEO_EXT" | grep -q "paperclip-tools" || MISSING_COORD="$MISSING_COORD paperclip-tools"
-echo "$CEO_EXT" | grep -q "escalate" || MISSING_COORD="$MISSING_COORD escalate"
-if [ -n "$MISSING_COORD" ]; then
-    fail "CEO missing coordination tools:$MISSING_COORD"
-else
-    pass
-fi
-
-# --- Validate bridge reads body.context (not body.env) ---
-begin_test "bridge.mjs reads body.context for wake context"
-BRIDGE="$AGENTS_DIR/bridge.mjs"
-if grep -q "body\.context" "$BRIDGE" && ! grep -q "body\.env\." "$BRIDGE"; then
+# --- Validate server reads body.context (not body.env) ---
+begin_test "server.mjs reads body.context for wake context"
+SERVER="$AGENTS_DIR/server.mjs"
+if grep -q "body\.context" "$SERVER" && ! grep -q "body\.env\." "$SERVER"; then
     pass
 else
-    if grep -q "body\.env\." "$BRIDGE"; then
-        fail "bridge still reads body.env — HTTP adapter sends body.context"
+    if grep -q "body\.env\." "$SERVER"; then
+        fail "server still reads body.env — HTTP adapter sends body.context"
     else
-        fail "bridge does not read body.context"
+        fail "server does not read body.context"
     fi
 fi
 
-begin_test "bridge.mjs builds prompt from paperclipTaskMarkdown"
-if grep -q "paperclipTaskMarkdown" "$BRIDGE"; then
+begin_test "server.mjs builds prompt from paperclipTaskMarkdown"
+if grep -q "paperclipTaskMarkdown" "$SERVER"; then
     pass
 else
-    fail "bridge does not use context.paperclipTaskMarkdown for prompt"
+    fail "server does not use context.paperclipTaskMarkdown for prompt"
 fi
 
 summary

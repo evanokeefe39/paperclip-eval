@@ -8,15 +8,16 @@ ENV NODE_PATH=/usr/local/lib/node_modules
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev
-COPY bridge.mjs logger.mjs ./
+COPY server.mjs logger.mjs ./
 COPY extensions/ /root/.pi/agent/extensions/
 COPY skills/paperclip-skills/ /app/skills/paperclip-skills/
+COPY skills/paperclip-skills/ /root/.pi/agent/skills/
 RUN pi extensions install || true
 RUN mkdir -p /workspace
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
   CMD node -e "fetch('http://localhost:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
-CMD ["node", "bridge.mjs"]
+CMD ["node", "server.mjs"]
 
 # ============================================================
 # LIGHTWEIGHT AGENTS — ceo, coder, qa, publisher

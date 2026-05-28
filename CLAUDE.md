@@ -13,7 +13,8 @@ artifacts/                  Shared agent artifact storage (bind-mounted into con
 scripts/init-artifact-db.sql  Postgres init script (artifact_store + paperclip databases)
 src/artifact-service/       Bun-based artifact storage service (HTTP API, MinIO, Postgres)
 src/agents/
-  bridge.mjs               HTTP-to-RPC bridge shim (Node, zero deps)
+  server.mjs               Agent HTTP server (Node, Pi SDK via AgentSession)
+  bridge.mjs               [DEPRECATED] Legacy HTTP-to-RPC bridge shim — replaced by server.mjs
   Dockerfile               Shared image — node:22-slim + Pi CLI
   setup.sh                  Canonical setup script (bash) — idempotent, env-configurable
   setup.ps1                 Thin WSL wrapper for setup.sh
@@ -172,9 +173,9 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - HTTP adapter agents also don't receive Paperclip's bundled behavioral skills (SKILL.md files that teach agents the heartbeat protocol, delegation patterns, memory)
 - Local adapters get skills via `syncSkills` — symlinked into agent CLI discovery path. HTTP adapter has no `syncSkills` implementation.
 - Solution: setup.sh fetches SKILL.md files from `github.com/paperclipai/paperclip/master/skills/` into `src/agents/skills/paperclip-skills/`
-- bridge.mjs passes `--skill /app/skills/paperclip-skills/{name}` for each skill to Pi's spawn args
+- Pi SDK's `DefaultResourceLoader` discovers skills from `/app/skills/paperclip-skills/` automatically
 - Pi loads skills natively with progressive disclosure: only skill descriptions in context, full SKILL.md content loaded on demand when agent needs it
-- Default skills (configurable via `PAPERCLIP_SKILLS` env var): `paperclip` (core heartbeat protocol + API reference), `paperclip-converting-plans-to-tasks` (issue decomposition), `para-memory-files` (PARA-method persistent memory)
+- Default skills: `paperclip` (core heartbeat protocol + API reference), `paperclip-converting-plans-to-tasks` (issue decomposition), `para-memory-files` (PARA-method persistent memory)
 - Skills include reference files under `references/` subdirectories — available on disk for agent file reads
 - Fetched content is gitignored — always pulled fresh from GitHub at setup time
 - Paperclip repo has 8 bundled skills total; we fetch the 3 relevant to agent coordination (the others are for Paperclip development, benchmarking, or plugin creation)
@@ -276,20 +277,21 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - Bash scripts run under WSL2
 - Docker Desktop for containers
 
-## Working with the bridge
+## Working with the agent server
 
-- bridge.mjs is eval-stage code — no auth, no streaming, but includes request queuing and crash recovery
-- Pi runs as a persistent process per container — spawned once at bridge startup, reused across all /invoke requests via new_session RPC command
-- Bridge serializes concurrent /invoke requests via FIFO queue (configurable depth via `BRIDGE_QUEUE_DEPTH` env var, default 8). Queue full returns 429.
-- Bridge auto-respawns Pi on crash with exponential backoff (1s, 2s, 4s, max 3 retries)
-- Environment variables: `BRIDGE_PORT`, `PI_PROVIDER`, `PI_MODEL`, `BRIDGE_TIMEOUT_MS`, `BRIDGE_QUEUE_DEPTH`, plus provider API keys
+- server.mjs uses Pi SDK (`createAgentSessionFromServices`) — no subprocess, no RPC, no JSONL parsing
+- Shared services initialized once at boot (~1-2s): extension loading, auth, model registry, settings
+- Fresh `AgentSession` created per /invoke request (~1-2ms) — no session bleed between tasks
+- Server serializes concurrent /invoke requests via FIFO queue (configurable depth via `QUEUE_MAX_DEPTH` env var, default 8). Queue full returns 429.
+- Environment variables: `BRIDGE_PORT`, `PI_PROVIDER`, `PI_MODEL`, `BRIDGE_TIMEOUT_MS`, `QUEUE_MAX_DEPTH`, plus provider API keys
 - Infrastructure env vars in root `.env`: `POSTGRES_PASSWORD`, `ARTIFACT_DB_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`
 - `ARTIFACT_SERVICE_URL` set per-agent in both docker-compose environment and agent `.env` files (defaults to `http://artifact-service:8090`)
-- Extension loading: Pi discovers extensions natively from `/root/.pi/agent/extensions/` at startup. Supports flat `*.ts` files and `*/index.ts` subdirectories. Bridge no longer does extension discovery or passes `-e` flags.
+- Extension loading: Pi SDK discovers extensions natively from `/root/.pi/agent/extensions/` via `DefaultResourceLoader`. Supports flat `*.ts` files and `*/index.ts` subdirectories.
 - Which extensions are on disk is controlled by Dockerfile COPY (devtime decision). Which tools the LLM can see is controlled by `pi-permissions.jsonc` (runtime enforcement).
-- HTTP adapter sends `{ agentId, runId, context }` — bridge builds prompt from `context.paperclipTaskMarkdown`, NOT from `body.prompt`/`body.env`
+- HTTP adapter sends `{ agentId, runId, context }` — server builds prompt from `context.paperclipTaskMarkdown`, NOT from `body.prompt`/`body.env`
 - Each agent gets its own container instance
 - Workspace mounted at `/workspace` inside containers
+- bridge.mjs is deprecated — kept for reference only
 
 ## Known issues
 
@@ -304,5 +306,5 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 ## Style
 
 - No Microsoft formats. Markdown and CSV only.
-- Keep scripts in bash (WSL). Keep bridge code in plain Node (no framework, no transpiler).
-- Minimal dependencies — the bridge has zero npm deps by design.
+- Keep scripts in bash (WSL). Keep server code in plain Node (no framework, no transpiler).
+- Minimal dependencies — server.mjs has one dep (pino for logging).

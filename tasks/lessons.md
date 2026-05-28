@@ -201,3 +201,22 @@ Patterns and corrections from implementation cycles. Review before starting work
 **Root cause:** Paperclip issue comments are append-only. When EVA-55 was created fresh, the CEO still saw comments from prior failed runs on related issues. The CEO correctly pattern-matched "adapter failures" but couldn't distinguish historical from current state.
 
 **Rule:** When restarting a milestone after infrastructure fixes, either (a) wipe the Paperclip instance entirely (scripts/wipe.sh) or (b) clean up error comments on active issues before re-running. Stale error context in Paperclip comments will contaminate agent decision-making.
+
+---
+
+## 2026-05-28: Pi SDK exists — don't build a subprocess bridge
+
+**What happened:** Built a 792-line bridge.mjs that spawns Pi as a subprocess in RPC mode (JSONL over stdin/stdout), then manually handles: JSONL line buffering, stdout event routing, new_session RPC with timeout/retry, agent_start readiness polling, crash detection with exponential backoff respawn, activeCollector state machine, pendingNewSession promise plumbing, graceful stdin teardown. Iterated through two major versions (v1 per-request spawn, v2 persistent process) over multiple days. The Pi SDK (`@earendil-works/pi-coding-agent`) exports `createAgentSession` and `createAgentSessionFromServices` — a programmatic API that handles all of this internally with zero subprocess management.
+
+**Root cause (Five Whys):**
+1. Why build a subprocess bridge? Because we needed to translate HTTP POST from Paperclip into Pi agent invocations.
+2. Why use subprocess RPC? Because Pi's `--mode rpc` was documented and we found it first.
+3. Why not check for a programmatic SDK? Because Pi is installed as a CLI tool (`pi` binary), so we treated it as a CLI-only interface.
+4. Why assume CLI-only? Because the npm package name (`@earendil-works/pi-coding-agent`) suggests a standalone agent, not an embeddable library.
+5. **Why not read the SDK docs?** Because we started from the CLI `--help` output and Docker container patterns instead of checking `pi.dev/docs/latest/sdk` for a programmatic API. The package has `"main": "./dist/index.js"` and exports `createAgentSession` — it was always designed for embedding.
+
+**What the SDK gives for free:** Extension auto-discovery from `~/.pi/agent/extensions/`, skill loading via `DefaultResourceLoader`, auth.json/models.json/settings.json resolution, tool execution and routing, streaming via `session.subscribe()`, session management. Benchmark shows `createAgentSessionServices` once at boot (~700ms-1.8s), then `createAgentSessionFromServices` per request at **1-2ms** — faster than the RPC `new_session` command ever was.
+
+**Fix:** server.mjs replaces bridge.mjs. 260 lines. `node:http` + Pi SDK. No subprocess, no JSONL parsing, no crash recovery, no RPC protocol. `session.prompt(text)` is a single await that handles agent_start, tool execution, turns, and agent_end internally.
+
+**Rule:** When integrating any CLI tool into a server, check for a programmatic SDK/library export before building subprocess wrappers. Read the package.json `exports` field. Check `{tool}.dev/docs` for an SDK page. The presence of a `bin` field does not mean CLI is the only interface — most modern tools are library-first, CLI-second.

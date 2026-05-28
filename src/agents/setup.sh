@@ -25,7 +25,13 @@ for arg in "$@"; do
   esac
 done
 
-COOKIE_JAR="$(mktemp)"
+# mktemp on MSYS/Git Bash produces /c/Users/... paths that curl can't write cookies to.
+# Use $TEMP (Windows-native path) when available.
+if [[ -n "${TEMP:-}" ]]; then
+  COOKIE_JAR="${TEMP}/paperclip-setup-cookies-$$.txt"
+else
+  COOKIE_JAR="$(mktemp)"
+fi
 trap 'rm -f "$COOKIE_JAR"' EXIT
 
 log() {
@@ -156,16 +162,24 @@ authenticate() {
 bootstrap() {
   log cyan "Creating bootstrap invite..."
 
+  # Check if already fully bootstrapped
+  local health_status
+  health_status="$(curl -sf "${PAPERCLIP_URL}/api/health" 2>/dev/null | jq -r '.bootstrapStatus // empty')"
+  if [[ "$health_status" != "bootstrap_pending" ]]; then
+    log green "  Already bootstrapped."
+    return 0
+  fi
+
   cat "${SCRIPT_DIR}/paperclip-config.json" | dc exec -T paperclip sh -c 'cat > /paperclip/instances/default/config.json && chown node:node /paperclip/instances/default/config.json' 2>/dev/null || true
+
+  # Delete any existing unaccepted invites so we get a fresh raw token
+  dc exec -T postgres psql -U postgres -d paperclip -c \
+    "DELETE FROM invites WHERE invite_type = 'bootstrap_ceo'" 2>/dev/null || true
+
   cat "${SCRIPT_DIR}/bootstrap-invite.cjs" | dc exec -T paperclip sh -c 'cat > /tmp/bootstrap-invite.cjs'
 
   local output
   output="$(dc exec -T paperclip node /tmp/bootstrap-invite.cjs 2>&1)"
-
-  if echo "$output" | grep -qi "already exists"; then
-    log green "  Bootstrap already done, skipping."
-    return 0
-  fi
 
   if ! echo "$output" | grep -q '/invite/'; then
     log red "Bootstrap failed: $output"
