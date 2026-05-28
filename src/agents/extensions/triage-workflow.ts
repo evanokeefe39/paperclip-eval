@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-import { JsonlWriter } from "./logging/jsonl.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 const AGENT_NAME = process.env.AGENT_NAME || "unknown";
 
@@ -61,16 +62,13 @@ function isAllowed(toolName: string): boolean {
   return (PHASE_TOOLS[phase] || []).includes(toolName);
 }
 
-const triageWriter = new JsonlWriter(AGENT_NAME, true);
-
-function logEvent(event: string, data: Record<string, unknown>) {
-  triageWriter.append({
-    ts: new Date().toISOString(),
-    agent: AGENT_NAME,
-    phase,
-    event,
-    ...data,
-  });
+function logEvent(event: string, data?: Record<string, unknown>) {
+  const dir = path.join(process.cwd(), "triage");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.appendFileSync(
+    path.join(dir, "audit.jsonl"),
+    JSON.stringify({ ts: new Date().toISOString(), agent: AGENT_NAME, phase, event, ...data }) + "\n"
+  );
 }
 
 export default function (pi: ExtensionAPI) {
