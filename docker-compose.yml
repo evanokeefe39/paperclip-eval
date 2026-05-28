@@ -145,6 +145,10 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 12
+    deploy:
+      resources:
+        limits:
+          memory: 2G
 
   ceo:
     <<: *agent

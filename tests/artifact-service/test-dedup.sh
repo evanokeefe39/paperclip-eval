@@ -9,7 +9,7 @@
 set -euo pipefail
 
 ARTIFACT_URL="${ARTIFACT_URL:-http://localhost:8090}"
-AGENT_NAME="test"
+AGENT_NAME="ceo"
 
 # Counters
 PASS=0
