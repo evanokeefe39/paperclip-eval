@@ -1,7 +1,9 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "typebox";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
-import * as client from "./artifact-client.js";
+import { ulid } from "./workproduct-lib/ulid.js";
 import { validateByStyle, type StyleProfiles } from "./workproduct-lib/validate.js";
 import {
   SourceReliability,
@@ -11,6 +13,81 @@ import {
   Corroboration,
   SourceSchema,
 } from "./workproduct-lib/schemas.js";
+
+// ---------------------------------------------------------------------------
+// Local filesystem storage helpers
+// ---------------------------------------------------------------------------
+
+const AGENT_NAME = process.env.AGENT_NAME || "unknown";
+
+function getWorkDir(): string {
+  return path.join(process.cwd(), "workproduct", "findings");
+}
+
+function ensureDir(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+interface LocalRecord {
+  id: string;
+  agent: string;
+  type: string;
+  timestamp: string;
+  content: string;
+  metadata: Record<string, unknown>;
+}
+
+function writeLocal(type: string, content: string, metadata: Record<string, unknown>): { id: string } {
+  const dir = getWorkDir();
+  ensureDir(dir);
+  const id = ulid();
+  const record: LocalRecord = {
+    id,
+    agent: AGENT_NAME,
+    type,
+    timestamp: new Date().toISOString(),
+    content,
+    metadata,
+  };
+  fs.writeFileSync(path.join(dir, `${id}-finding.json`), JSON.stringify(record, null, 2));
+  return { id };
+}
+
+function readLocal(id: string): LocalRecord | null {
+  const dir = getWorkDir();
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  const match = files.find(f => f.startsWith(id));
+  if (!match) return null;
+  return JSON.parse(fs.readFileSync(path.join(dir, match), "utf8"));
+}
+
+function listLocal(filters?: { type?: string; session_id?: string }): LocalRecord[] {
+  const dir = getWorkDir();
+  if (!fs.existsSync(dir)) return [];
+  const files = fs.readdirSync(dir).filter(f => f.endsWith(".json"));
+  const records: LocalRecord[] = [];
+  for (const f of files) {
+    try {
+      const rec = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as LocalRecord;
+      if (filters?.type && rec.type !== filters.type) continue;
+      if (filters?.session_id && rec.metadata.session_id !== filters.session_id) continue;
+      records.push(rec);
+    } catch { /* skip corrupt files */ }
+  }
+  return records.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+function updateLocalMetadata(id: string, metadata: Record<string, unknown>): boolean {
+  const dir = getWorkDir();
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+  const match = files.find(f => f.startsWith(id));
+  if (!match) return false;
+  const filePath = path.join(dir, match);
+  const rec = JSON.parse(fs.readFileSync(filePath, "utf8")) as LocalRecord;
+  rec.metadata = { ...rec.metadata, ...metadata };
+  fs.writeFileSync(filePath, JSON.stringify(rec, null, 2));
+  return true;
+}
 
 // ---------------------------------------------------------------------------
 // Researcher-specific style enum (not in shared schemas — researcher uses
@@ -139,13 +216,13 @@ function getSessionId(): string {
   return process.env.PAPERCLIP_RUN_ID || process.env.SESSION_ID || "default";
 }
 
-function recordToFinding(rec: client.ArtifactRecord, content: string): StoredFinding {
+function recordToFinding(rec: LocalRecord, content: string): StoredFinding {
   const m = rec.metadata as Record<string, any>;
   return {
     id: rec.id,
     session_id: m.session_id || "",
-    agent: rec.agent_name,
-    timestamp: rec.created_at,
+    agent: rec.agent,
+    timestamp: rec.timestamp,
     claim_preview: m.claim_preview || "",
     style: m.style || "general",
     claim: content,
@@ -165,7 +242,7 @@ function recordToFinding(rec: client.ArtifactRecord, content: string): StoredFin
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
-  const agentName = client.getAgentName();
+  const agentName = AGENT_NAME;
   if (agentName !== "researcher") {
     if (agentName) {
       console.warn(
@@ -238,27 +315,19 @@ export default function (pi: ExtensionAPI) {
         const grade = admiraltyGrade(sources, primaryIdx);
         const sessionId = getSessionId();
 
-        const result = await client.write({
-          type: "finding",
-          bucket: "artifacts",
-          filename: "finding.json",
-          mime: "application/json",
-          content: JSON.stringify(params.claim),
-          metadata: {
-            style,
-            sources,
-            primary_source_index: primaryIdx,
-            corroboration,
-            admiralty_grade: grade,
-            date_information: params.date_information || undefined,
-            topic_tags: params.topic_tags || [],
-            entities: params.entities || [],
-            related_findings: params.related_findings || [],
-            contradicts: params.contradicts || [],
-            claim_preview: params.claim.slice(0, 120),
-            session_id: sessionId,
-          },
-          run_id: sessionId,
+        const result = writeLocal("finding", JSON.stringify(params.claim), {
+          style,
+          sources,
+          primary_source_index: primaryIdx,
+          corroboration,
+          admiralty_grade: grade,
+          date_information: params.date_information || undefined,
+          topic_tags: params.topic_tags || [],
+          entities: params.entities || [],
+          related_findings: params.related_findings || [],
+          contradicts: params.contradicts || [],
+          claim_preview: params.claim.slice(0, 120),
+          session_id: sessionId,
         });
 
         const parts = [`Finding recorded: ${result.id}`];
@@ -293,8 +362,11 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId: string, params: Record<string, any>, _signal?: AbortSignal) {
       try {
-        const { content: rawContent, metadata: rec } = await client.read(params.finding_id);
-        if (rec.artifact_type !== "finding") {
+        const rec = readLocal(params.finding_id);
+        if (!rec) {
+          return { content: [{ type: "text" as const, text: `Error: finding ${params.finding_id} not found` }] };
+        }
+        if (rec.type !== "finding") {
           return { content: [{ type: "text" as const, text: `Error: artifact ${params.finding_id} is not a finding` }] };
         }
 
@@ -318,7 +390,7 @@ export default function (pi: ExtensionAPI) {
         const corroboration = inferCorroboration(updatedSources);
         const primaryIdx: number = m.primary_source_index ?? 0;
 
-        await client.updateMetadata(params.finding_id, {
+        updateLocalMetadata(params.finding_id, {
           ...m,
           sources: updatedSources,
           corroboration,
@@ -365,22 +437,14 @@ export default function (pi: ExtensionAPI) {
       try {
         const targetAgent = params.agent || agentName;
 
-        const metadataFilter: Record<string, unknown> = {};
-        if (params.style) metadataFilter.style = params.style;
-        if (params.session_id) metadataFilter.session_id = params.session_id;
-
-        const records = await client.list({
-          type: "finding",
-          agent: targetAgent,
-          since: params.since,
-          metadata: Object.keys(metadataFilter).length > 0 ? metadataFilter : undefined,
-        });
+        const allRecords = listLocal({ type: "finding", session_id: params.session_id });
 
         const reliabilityOrder = "ABCDEF";
-        let findings: Array<{ rec: client.ArtifactRecord; m: Record<string, any> }> = records.map(rec => ({
-          rec,
-          m: rec.metadata as Record<string, any>,
-        }));
+        let findings: Array<{ rec: LocalRecord; m: Record<string, any> }> = allRecords
+          .filter(rec => !params.agent || rec.agent === targetAgent)
+          .filter(rec => !params.since || rec.timestamp >= params.since)
+          .filter(rec => !params.style || (rec.metadata as Record<string, any>).style === params.style)
+          .map(rec => ({ rec, m: rec.metadata as Record<string, any> }));
 
         if (params.topic_tag) {
           const tag = params.topic_tag.toLowerCase();
@@ -414,7 +478,7 @@ export default function (pi: ExtensionAPI) {
           });
         }
 
-        findings.sort((a, b) => b.rec.created_at.localeCompare(a.rec.created_at));
+        findings.sort((a, b) => b.rec.timestamp.localeCompare(a.rec.timestamp));
 
         const limit = params.limit || 50;
         findings = findings.slice(0, limit);
@@ -454,10 +518,12 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId: string, params: Record<string, any>, _signal?: AbortSignal) {
       try {
-        const { content: rawContent, metadata: rec } = await client.read(params.id);
+        const rec = readLocal(params.id);
+        if (!rec) {
+          return { content: [{ type: "text" as const, text: `Error: finding ${params.id} not found` }] };
+        }
 
-        const claim = rawContent.toString("utf8");
-        const finding = recordToFinding(rec, JSON.parse(claim));
+        const finding = recordToFinding(rec, JSON.parse(rec.content));
         const grade = admiraltyGrade(finding.sources, finding.primary_source_index);
 
         const text = JSON.stringify(finding, null, 2);
