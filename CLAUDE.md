@@ -40,17 +40,12 @@ src/agents/
       tier-apify.ts         T4: Apify actor tools (scrape_apify, list_actors, apify_save_dataset, scrape_status)
       tier-video.ts         T5: Video/audio (transcribe_audio, analyze_video, enrich_video)
     escalate.ts             Human escalation via Paperclip issues
-    artifact-client.ts      Shared HTTP client for artifact service
-    artifacts.ts            Artifact tools (write/read/list via artifact-client.ts)
+    artifacts/              Artifact tools (index.ts entry point)
+      index.ts              Extension entry point — write_artifact, read_artifact, list_artifacts tools
+      client.ts             Private HTTP client for artifact service
     paperclip/              Paperclip platform tools (index.ts entry point)
       _client.ts            Shared Paperclip API client (request, resolveCompanyId, etc.)
       index.ts              Pi extension registering all 40 Paperclip MCP tools
-    logging/                OTel-backed logging (index.ts entry point)
-      index.ts              Extension entry point — log_event, get_log, get_trace_id tools
-      types.ts              LogEntry, LogLevel types
-      buffer.ts             Ring buffer for in-memory log queries
-      jsonl.ts              JSONL log writer (via artifact-client.ts to logs bucket)
-      otel.ts               pi-otel event bus integration (structured logs to Aspire)
     triage-workflow.ts      CEO triage gate — web grounding + routing before delegation
     workproduct/            Standardized work products (index.ts entry point)
       index.ts              Extension entry point — record_finding, add_source, query_findings, get_finding tools
@@ -144,7 +139,7 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - Postgres shared between Paperclip (DATABASE_URL) and artifact service (artifact_store DB)
 - Artifact service at http://artifact-service:8090 on Docker network, :8090 on host
 - MinIO at http://minio:9000 on Docker network, :9000 (API) and :9001 (console) on host
-- Infrastructure ports: 3100 (Paperclip), 5432 (Postgres), 8090 (artifact service), 9000 (MinIO API), 9001 (MinIO console), 18888 (Aspire Dashboard)
+- Infrastructure ports: 3100 (Paperclip), 5432 (Postgres), 8090 (artifact service), 9000 (MinIO API), 9001 (MinIO console), 5080 (OpenObserve)
 - On Docker network: Paperclip reaches agents at http://ceo:8080, http://researcher:8080
 - Agents registered via HTTP adapter, not pi_local (bypasses CLI arg length limit)
 - Pi runs in RPC mode inside containers — JSONL over stdin/stdout
@@ -227,7 +222,7 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - Data uses `src/agents/data/Dockerfile` (heavy bespoke: Python + scrapling[fetchers] + Chromium)
 - Writer uses `src/agents/writer/Dockerfile` (Vale linter + style extensions)
 - All extensions COPY'd to `/root/.pi/agent/extensions/` in base stage. Pi discovers natively (*.ts and */index.ts).
-- Universal extensions (every agent): artifacts.ts, logging/, escalate.ts, types/, paperclip/
+- Universal extensions (every agent): artifacts/, escalate.ts, types/, paperclip/
 - Agent-specific scripts go in `src/agents/{agent}/scripts/`, copied to `/app/scripts/` in container
 
 ## Agent permissions (pi-permission-system)
@@ -250,27 +245,24 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - CEO cannot skip phases — hooks block tools not allowed in current phase
 - Audit log at `/artifacts/ceo/triage.log.jsonl` tracks phase transitions and blocked attempts
 
-## Observability (OTel + Aspire Dashboard)
+## Observability (OTel + OpenObserve)
 
 - pi-otel extension installed in all agent containers — automatic tracing of LLM calls, tool executions, agent turns
-- Aspire Dashboard container in docker-compose at http://localhost:18888 — traces, structured logs, metrics
-- pi-otel exports via OTLP gRPC to `dashboard:18889`
+- OpenObserve container in docker-compose at http://localhost:5080 — traces, structured logs, metrics
+- pi-otel exports via OTLP to `openobserve:5080`
 - Each agent's `.pi/agent/settings.json` has `otel` config with per-agent `serviceName`
 - Span hierarchy: `pi.interaction` → `pi.turn` → `pi.llm_request` / `pi.tool.<name>`
-- logging/ extension emits structured logs to dashboard via `pi.events.emit("pi-otel:log", ...)`
-- logging.ts also writes JSONL to `/artifacts/{agent}/run.log.jsonl` and maintains in-memory ring buffer
-- Tools: `log_event` (structured logging), `get_log` (query buffer), `get_trace_id` (cross-agent correlation)
 - Bridge generates W3C TRACEPARENT per /invoke request, propagates to Pi process
 - Bridge extracts token usage from `turn_end` events, POSTs to Paperclip cost-events API
 - Response JSON includes `trace_id` and `usage` summary
-- Tests: `node --test tests/logging/unit-test.mjs` (23 tests)
 
 ## Inter-agent artifact sharing
 
 - Artifact service at `src/artifact-service/` — Bun HTTP service on :8090 behind Docker network
 - Blob storage: MinIO (S3-compatible) with 3 buckets: artifacts, logs, state
 - Metadata: Postgres with JSONB column for type-specific fields, GIN index for queries
-- Agents write via `artifact-client.ts` (shared HTTP client), never touch filesystem directly
+- Extensions write to local filesystem first, then publish via `write_artifact` tool when work is complete
+- `artifact-client.ts` is private to the artifacts extension — other extensions do not import it directly
 - Artifacts referenced by `artifact://` URIs (e.g. `artifact://default/default/run123/researcher/research/01JHX_findings.md`)
 - Downstream agent resolves URI via `read_artifact` tool when it needs content
 - RBAC via `src/agents/rbac.json` — glob-pattern read/write rules per agent
