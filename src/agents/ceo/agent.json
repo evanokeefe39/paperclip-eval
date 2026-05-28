@@ -10,6 +10,6 @@
     "timeoutSec": 300
   },
   "runtimeConfig": {
-    "heartbeat": { "enabled": true, "intervalSec": 120, "wakeOnDemand": true }
+    "heartbeat": { "enabled": true, "intervalSec": 300, "wakeOnDemand": true, "cooldownSec": 30, "maxConcurrentRuns": 1 }
   }
 }
