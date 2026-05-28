@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# E2E-18: Server Contention — FIFO Queue Behavior (v3.0.0)
+# E2E-18: Server Contention — Async Queue Behavior (v3.0.0)
 #
-# Validates that server v3.0.0 queues concurrent /invoke requests in a FIFO
-# queue instead of rejecting with 503. Both requests complete with HTTP 200.
-# Health endpoint exposes queue state (busy, queue_depth).
+# Validates that server v3.0.0 accepts concurrent /invoke requests with HTTP
+# 202, queues them in a FIFO queue, and completes them asynchronously. Run
+# status queryable via GET /runs/:runId. Health endpoint exposes queue state
+# (busy, queue_depth).
 #
 # Requires: researcher server running on port 8082.
 
@@ -19,7 +20,7 @@ trap 'rm -rf "$TMPDIR_CONTENTION"' EXIT
 
 echo ""
 echo "══════════════════════════════════════════════════════════════════"
-echo "[E2E-18] Server Contention — FIFO Queue Behavior (v3.0.0)"
+echo "[E2E-18] Server Contention — Async Queue Behavior (v3.0.0)"
 echo "  Server: $BRIDGE_URL"
 echo "  Results: $RESULTS_DIR"
 echo "══════════════════════════════════════════════════════════════════"
@@ -67,10 +68,10 @@ if assert_not_empty "$QMAX" "queue_max"; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────
-# TEST 4+5: Concurrent invocations — both return HTTP 200
+# TEST 4+5+6+7: Concurrent invocations — both accepted with HTTP 202
 #
-# Fire two /invoke requests concurrently. The first occupies the session;
-# the second should be queued (not rejected). Both must return 200.
+# Fire two /invoke requests. Both return 202 immediately with a runId.
+# Poll GET /runs/:runId until both complete asynchronously.
 # ─────────────────────────────────────────────────────────────────────
 
 PAYLOAD_A=$(jq -n '{
@@ -98,90 +99,101 @@ echo "── Concurrent invocation ──"
 echo ""
 log "Sending request A (slow task)..."
 
-curl -s --max-time 300 \
+RESP_A=$(curl -s --max-time 10 \
     -X POST \
     -H "Content-Type: application/json" \
     -d "$PAYLOAD_A" \
     -w "\n%{http_code}" \
-    "$BRIDGE_URL/invoke" > "$TMPDIR_CONTENTION/resp_a.txt" 2>&1 &
-PID_A=$!
+    "$BRIDGE_URL/invoke")
 
-sleep 3
+STATUS_A=$(echo "$RESP_A" | tail -1 | tr -d '[:space:]')
+BODY_A=$(echo "$RESP_A" | sed '$d')
+RUN_ID_A=$(echo "$BODY_A" | jq -r '.runId // empty')
 
-log "Sending request B (queued task)..."
-
-curl -s --max-time 300 \
-    -X POST \
-    -H "Content-Type: application/json" \
-    -d "$PAYLOAD_B" \
-    -w "\n%{http_code}" \
-    "$BRIDGE_URL/invoke" > "$TMPDIR_CONTENTION/resp_b.txt" 2>&1 &
-PID_B=$!
-
-# ─────────────────────────────────────────────────────────────────────
-# TEST 4: Health shows busy + queued while both are in-flight
-# ─────────────────────────────────────────────────────────────────────
 sleep 2
 
-begin_test "Health shows busy=true and queue_depth>=1 during contention"
+# ─────────────────────────────────────────────────────────────────────
+# TEST 4: Health shows busy while A is processing
+# ─────────────────────────────────────────────────────────────────────
+begin_test "Health shows busy=true while request A is processing"
 HEALTH_MID=$(curl -sf "$BRIDGE_URL/health" 2>/dev/null || echo '{}')
 MID_BUSY=$(echo "$HEALTH_MID" | jq -r '.busy | tostring')
 MID_QDEPTH=$(echo "$HEALTH_MID" | jq -r '.queue_depth // empty')
 
-if [ "$MID_BUSY" = "true" ] && [ "${MID_QDEPTH:-0}" -ge 1 ]; then
+if [ "$MID_BUSY" = "true" ]; then
     log "busy=$MID_BUSY queue_depth=$MID_QDEPTH"
     pass
 else
-    log "busy=$MID_BUSY queue_depth=$MID_QDEPTH (may have drained before check)"
+    log "busy=$MID_BUSY queue_depth=$MID_QDEPTH (may have completed before check)"
     if [ "$MID_BUSY" = "false" ] && [ "${MID_QDEPTH:-0}" -eq 0 ]; then
-        skip "both requests completed before health check — timing dependent"
+        skip "request A completed before health check — timing dependent"
     else
         pass
     fi
 fi
 
-# ─────────────────────────────────────────────────────────────────────
-# Wait for both requests to complete
-# ─────────────────────────────────────────────────────────────────────
-log "Waiting for both requests to complete..."
-wait $PID_A 2>/dev/null || true
-wait $PID_B 2>/dev/null || true
-log "Both requests returned."
+log "Sending request B (queued task)..."
 
-STATUS_A=$(tail -1 "$TMPDIR_CONTENTION/resp_a.txt" | tr -d '[:space:]')
-STATUS_B=$(tail -1 "$TMPDIR_CONTENTION/resp_b.txt" | tr -d '[:space:]')
-BODY_A=$(sed '$d' "$TMPDIR_CONTENTION/resp_a.txt")
-BODY_B=$(sed '$d' "$TMPDIR_CONTENTION/resp_b.txt")
+RESP_B=$(curl -s --max-time 10 \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -d "$PAYLOAD_B" \
+    -w "\n%{http_code}" \
+    "$BRIDGE_URL/invoke")
 
-echo "$BODY_A" > "$RESULTS_DIR/response_a.json"
-echo "$BODY_B" > "$RESULTS_DIR/response_b.json"
+STATUS_B=$(echo "$RESP_B" | tail -1 | tr -d '[:space:]')
+BODY_B=$(echo "$RESP_B" | sed '$d')
+RUN_ID_B=$(echo "$BODY_B" | jq -r '.runId // empty')
 
 echo ""
 echo "── Results ──"
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────
-# TEST 5: Request A returned HTTP 200
+# TEST 5: Request A accepted with HTTP 202
 # ─────────────────────────────────────────────────────────────────────
-begin_test "Request A returned HTTP 200"
-if assert_eq "$STATUS_A" "200" "HTTP status A"; then
-    OUTPUT_A=$(echo "$BODY_A" | jq -r '.output // empty' 2>/dev/null || true)
-    log "output excerpt: ${OUTPUT_A:0:80}"
+begin_test "Request A accepted with HTTP 202"
+if assert_eq "$STATUS_A" "202" "HTTP status A"; then
+    log "runId: $RUN_ID_A"
     pass
 fi
 
 # ─────────────────────────────────────────────────────────────────────
-# TEST 6: Request B returned HTTP 200 (not 503)
+# TEST 6: Request B accepted with HTTP 202
 # ─────────────────────────────────────────────────────────────────────
-begin_test "Request B returned HTTP 200 (queued, not rejected)"
-if assert_eq "$STATUS_B" "200" "HTTP status B"; then
-    OUTPUT_B=$(echo "$BODY_B" | jq -r '.output // empty' 2>/dev/null || true)
-    log "output excerpt: ${OUTPUT_B:0:80}"
+begin_test "Request B accepted with HTTP 202 (queued, not rejected)"
+if assert_eq "$STATUS_B" "202" "HTTP status B"; then
+    log "runId: $RUN_ID_B"
     pass
 fi
 
 # ─────────────────────────────────────────────────────────────────────
-# TEST 7: Health shows idle after both complete
+# TEST 7: Both runs complete successfully
+# ─────────────────────────────────────────────────────────────────────
+begin_test "Both runs complete successfully via polling"
+log "Polling run A ($RUN_ID_A) and run B ($RUN_ID_B)..."
+
+RESULT_A=$(bridge_poll_run "$BRIDGE_URL" "$RUN_ID_A" 300)
+RESULT_B=$(bridge_poll_run "$BRIDGE_URL" "$RUN_ID_B" 300)
+
+STATUS_A_FINAL=$(echo "$RESULT_A" | jq -r '.status // empty')
+STATUS_B_FINAL=$(echo "$RESULT_B" | jq -r '.status // empty')
+
+if [ "$STATUS_A_FINAL" = "completed" ] && [ "$STATUS_B_FINAL" = "completed" ]; then
+    OUTPUT_A=$(echo "$RESULT_A" | jq -r '.output // empty')
+    OUTPUT_B=$(echo "$RESULT_B" | jq -r '.output // empty')
+    log "A output excerpt: ${OUTPUT_A:0:80}"
+    log "B output excerpt: ${OUTPUT_B:0:80}"
+    pass
+else
+    fail "A=$STATUS_A_FINAL B=$STATUS_B_FINAL (expected both completed)"
+fi
+
+echo "$RESULT_A" > "$RESULTS_DIR/response_a.json"
+echo "$RESULT_B" > "$RESULTS_DIR/response_b.json"
+
+# ─────────────────────────────────────────────────────────────────────
+# TEST 8: Health shows idle after both complete
 # ─────────────────────────────────────────────────────────────────────
 begin_test "Health shows busy=false and queue_depth=0 after completion"
 HEALTH_POST=$(curl -sf "$BRIDGE_URL/health")

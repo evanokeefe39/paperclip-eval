@@ -128,12 +128,89 @@ bridge_post() {
     local url="$1"
     local body="$2"
     local timeout="${3:-$REQUEST_TIMEOUT}"
-    curl -sf \
-        --max-time "$timeout" \
+    local deadline=$((SECONDS + timeout))
+
+    # POST and get runId from 202 response
+    local accept_resp
+    accept_resp=$(curl -s --max-time 10 \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -d "$body" \
+        "$url/invoke")
+
+    local run_id
+    run_id=$(echo "$accept_resp" | jq -r '.runId // empty')
+    if [ -z "$run_id" ]; then
+        echo "$accept_resp"
+        return 1
+    fi
+
+    # Poll until terminal state
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        local run_resp
+        run_resp=$(curl -sf "$url/runs/$run_id" 2>/dev/null || echo '{}')
+        local status
+        status=$(echo "$run_resp" | jq -r '.status // empty')
+
+        case "$status" in
+            completed)
+                echo "$run_resp"
+                return 0
+                ;;
+            failed|timeout)
+                echo "$run_resp"
+                return 1
+                ;;
+            queued|running)
+                sleep 3
+                ;;
+            *)
+                sleep 3
+                ;;
+        esac
+    done
+
+    echo '{"error":"poll_timeout"}'
+    return 1
+}
+
+bridge_post_async() {
+    local url="$1"
+    local body="$2"
+    curl -s --max-time 10 \
         -X POST \
         -H "Content-Type: application/json" \
         -d "$body" \
         "$url/invoke"
+}
+
+bridge_poll_run() {
+    local url="$1"
+    local run_id="$2"
+    local timeout="${3:-$REQUEST_TIMEOUT}"
+    local deadline=$((SECONDS + timeout))
+
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        local run_resp
+        run_resp=$(curl -sf "$url/runs/$run_id" 2>/dev/null || echo '{}')
+        local status
+        status=$(echo "$run_resp" | jq -r '.status // empty')
+
+        case "$status" in
+            completed)
+                echo "$run_resp"
+                return 0
+                ;;
+            failed|timeout)
+                echo "$run_resp"
+                return 1
+                ;;
+        esac
+        sleep 3
+    done
+
+    echo '{"error":"poll_timeout"}'
+    return 1
 }
 
 # --- Auth ---
