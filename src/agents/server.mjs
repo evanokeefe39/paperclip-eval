@@ -69,6 +69,19 @@ const metrics = {
   cold_start_ms: null,
 };
 
+// --- Run tracking ---
+
+const MAX_RUN_HISTORY = 100;
+const runs = new Map();
+
+function trackRun(runId, data) {
+  runs.set(runId, { ...runs.get(runId), ...data });
+  while (runs.size > MAX_RUN_HISTORY) {
+    const oldest = runs.keys().next().value;
+    runs.delete(oldest);
+  }
+}
+
 // --- FIFO queue (Pi sessions are sequential — one prompt at a time) ---
 
 const queue = [];
@@ -121,7 +134,9 @@ function extractPrompt(body) {
 
 // --- Process a single invocation ---
 
-async function processInvocation(body, traceId, requestStart, res) {
+async function processInvocation(body, traceId, requestStart) {
+  trackRun(traceId, { status: "running" });
+
   const ctx = body.context || {};
   const runId = body.runId || null;
 
@@ -157,8 +172,7 @@ async function processInvocation(body, traceId, requestStart, res) {
     metrics.requests_active--;
     metrics.requests_failed++;
     log("error", "session_create_failed", { error: err.message, trace_id: traceId });
-    res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "session_create_failed", detail: err.message }));
+    trackRun(traceId, { status: "failed", completedAt: new Date().toISOString(), error: err.message });
     processing = false;
     drainQueue();
     return;
@@ -203,8 +217,11 @@ async function processInvocation(body, traceId, requestStart, res) {
     metrics.requests_failed++;
     const isTimeout = err.message === "timeout";
     log("error", "prompt_failed", { error: err.message, trace_id: traceId });
-    res.writeHead(isTimeout ? 504 : 500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: isTimeout ? "timeout" : "prompt_failed", detail: err.message }));
+    trackRun(traceId, {
+      status: isTimeout ? "timeout" : "failed",
+      completedAt: new Date().toISOString(),
+      error: err.message,
+    });
     processing = false;
     drainQueue();
     return;
@@ -235,8 +252,7 @@ async function processInvocation(body, traceId, requestStart, res) {
 
   reportCostEvent(usage).catch(() => {});
 
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ output, events, trace_id: traceId, usage }));
+  trackRun(traceId, { status: "completed", completedAt: new Date().toISOString(), output, usage });
 
   processing = false;
   drainQueue();
@@ -255,6 +271,7 @@ const server = http.createServer(async (req, res) => {
       busy: processing,
       queue_depth: queue.length,
       queue_max: QUEUE_MAX_DEPTH,
+      runs_active: [...runs.values()].filter(r => r.status === "queued" || r.status === "running").length,
     }));
   }
 
@@ -272,7 +289,20 @@ const server = http.createServer(async (req, res) => {
       last_request_at: metrics.last_request_at,
       cold_start_ms: metrics.cold_start_ms,
       queue_depth: queue.length,
+      runs_completed: [...runs.values()].filter(r => r.status === "completed").length,
+      runs_active: [...runs.values()].filter(r => r.status === "queued" || r.status === "running").length,
     }));
+  }
+
+  if (req.method === "GET" && req.url.startsWith("/runs/")) {
+    const runId = req.url.slice(6).split("?")[0];
+    const run = runs.get(runId);
+    if (!run) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "not_found" }));
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ runId, ...run }));
   }
 
   if (req.method !== "POST" || req.url !== "/invoke") {
@@ -309,23 +339,38 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ error: "invalid_json", detail: err.message }));
   }
 
+  // Check queue capacity before accepting
+  if (processing && queue.length >= QUEUE_MAX_DEPTH) {
+    metrics.requests_active--;
+    metrics.requests_failed++;
+    res.writeHead(429, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: "queue_full", detail: `${queue.length}/${QUEUE_MAX_DEPTH}` }));
+  }
+
+  // Track run and respond 202 immediately
+  trackRun(traceId, {
+    status: "queued",
+    startedAt: new Date().toISOString(),
+    wakeReason: body.context?.wakeReason || "heartbeat",
+    output: null,
+    error: null,
+    usage: null,
+  });
+
+  res.writeHead(202, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ runId: traceId, status: "accepted" }));
+
   if (processing) {
-    if (queue.length >= QUEUE_MAX_DEPTH) {
-      metrics.requests_active--;
-      metrics.requests_failed++;
-      res.writeHead(429, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ error: "queue_full", detail: `${queue.length}/${QUEUE_MAX_DEPTH}` }));
-    }
     log("info", "request_queued", { depth: queue.length + 1, trace_id: traceId });
     queue.push(() => {
       processing = true;
-      processInvocation(body, traceId, requestStart, res);
+      processInvocation(body, traceId, requestStart);
     });
     return;
   }
 
   processing = true;
-  processInvocation(body, traceId, requestStart, res);
+  processInvocation(body, traceId, requestStart);
 });
 
 // --- Startup ---
