@@ -278,8 +278,11 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 
 ## Working with the bridge
 
-- bridge.mjs is a starting point, not production code — no auth, no streaming, no retry
-- Environment variables: `BRIDGE_PORT`, `PI_PROVIDER`, `PI_MODEL`, `BRIDGE_TIMEOUT_MS`, plus provider API keys
+- bridge.mjs is eval-stage code — no auth, no streaming, but includes request queuing and crash recovery
+- Pi runs as a persistent process per container — spawned once at bridge startup, reused across all /invoke requests via new_session RPC command
+- Bridge serializes concurrent /invoke requests via FIFO queue (configurable depth via `BRIDGE_QUEUE_DEPTH` env var, default 8). Queue full returns 429.
+- Bridge auto-respawns Pi on crash with exponential backoff (1s, 2s, 4s, max 3 retries)
+- Environment variables: `BRIDGE_PORT`, `PI_PROVIDER`, `PI_MODEL`, `BRIDGE_TIMEOUT_MS`, `BRIDGE_QUEUE_DEPTH`, plus provider API keys
 - Infrastructure env vars in root `.env`: `POSTGRES_PASSWORD`, `ARTIFACT_DB_PASSWORD`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`
 - `ARTIFACT_SERVICE_URL` set per-agent in both docker-compose environment and agent `.env` files (defaults to `http://artifact-service:8090`)
 - Extension loading: Pi discovers extensions natively from `/root/.pi/agent/extensions/` at startup. Supports flat `*.ts` files and `*/index.ts` subdirectories. Bridge no longer does extension discovery or passes `-e` flags.
