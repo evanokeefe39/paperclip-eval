@@ -4,6 +4,20 @@ Patterns and corrections from implementation cycles. Review before starting work
 
 ---
 
+## 2026-05-28: Pi RPC mode is persistent — stop killing the process
+
+**What happened:** Bridge spawned a new Pi process on every /invoke request and killed it via `pi.stdin.end()` after `agent_end`. Every request paid 1.7-2.6s cold start (Node.js startup + TypeScript transpilation + extension loading). Over a delegation chain of 5 invocations, that's 10+ seconds of pure waste.
+
+**Root cause:** Misunderstanding of Pi's RPC lifecycle. `agent_end` means "this prompt is done," not "process is done." The process stays alive and listening on stdin for the next prompt. The `--no-session` flag only disables disk persistence of conversation history — in-memory context survives between prompts within the same process.
+
+**Discovery:** Pi's RPC protocol supports `new_session` command to reset conversation context between independent invocations. It also supports `follow_up`, `steer`, `abort`, `get_state`, `compact`, and session management commands — all on the same persistent process.
+
+**Fix:** Bridge v2.0.0 spawns Pi once at startup, reuses across all /invoke requests. Sends `{"type":"new_session"}` between independent Paperclip heartbeat invocations to reset context. Auto-respawns on crash with exponential backoff (1s, 2s, 4s, max 3 attempts). FIFO queue serializes access to the single Pi process.
+
+**Rule:** Pi's RPC mode is a persistent service. Spawn once, keep stdin open, send new_session between independent invocations. Never close stdin unless shutting down the container. This eliminates cold-start overhead entirely for all requests after the first.
+
+---
+
 ## 2026-05-27: HTTP adapter payload is NOT local-adapter payload
 
 **What happened:** Bridge read `body.prompt`, `body.systemPrompt`, `body.env.PAPERCLIP_WAKE_REASON` — all undefined for HTTP adapter. Every agent got "Continue your work." as its prompt, losing all Paperclip-provided task context.
