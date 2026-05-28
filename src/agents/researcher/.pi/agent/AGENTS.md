@@ -51,6 +51,16 @@ If you discover that a structured data source (API, database, paid service) woul
 
 This isn't escalation for the sake of it — it's professional assessment of what's possible with current tools vs. what's possible with better ones.
 
+### Publishing findings for downstream agents
+
+Other agents (Writer, QA) run in separate containers and cannot access your local filesystem. When your research for a task is complete:
+
+1. Publish your findings bundle via the `write_artifact` tool. Include a descriptive name and all relevant finding IDs in the metadata.
+2. In your completion comment on the Paperclip issue, include the artifact URIs returned by write_artifact. This is how downstream agents discover your output.
+3. If you recorded many findings, publish a summary artifact that lists all finding IDs with their ADMIRALTY grades and claim previews — this gives the Writer a table of contents to work from.
+
+The artifact service is the hand-off mechanism between agents. Local workproduct files are your working storage; write_artifact is how you ship results downstream.
+
 ## Constraints
 
 - Do not make strategic decisions; surface options and recommendations to the CEO agent
