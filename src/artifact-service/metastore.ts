@@ -33,6 +33,24 @@ export async function insertArtifact(record: ArtifactRecord): Promise<void> {
   `;
 }
 
+/** Find an existing artifact by content hash. Returns null when no match. */
+export async function findByContentHash(
+  hash: string,
+): Promise<ArtifactRecord | null> {
+  const rows = await sql`
+    SELECT
+      id, filename, artifact_type, mime_type, agent_name,
+      run_id, company_id, project_id, bucket, s3_key,
+      content_hash, size_bytes, metadata, created_at
+    FROM artifacts
+    WHERE content_hash = ${hash}
+    LIMIT 1
+  `;
+
+  if (rows.length === 0) return null;
+  return toRecord(rows[0]);
+}
+
 /** Look up a single artifact by id. Returns null when not found. */
 export async function getArtifactById(
   id: string,

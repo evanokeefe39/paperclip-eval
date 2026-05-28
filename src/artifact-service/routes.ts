@@ -5,6 +5,7 @@ import { putBlob, getBlob, checkConnection as storageHealth } from "./storage";
 import {
   insertArtifact,
   getArtifactById,
+  findByContentHash,
   listArtifacts,
   updateMetadata,
   checkConnection as metastoreHealth,
@@ -60,6 +61,18 @@ export async function handleWrite(
   const hasher = new Bun.CryptoHasher("sha256");
   hasher.update(content);
   const hash = hasher.digest("hex") as string;
+
+  // Dedup: if identical content already stored, return the existing record
+  const existing = await findByContentHash(hash);
+  if (existing) {
+    return Response.json({
+      ref: buildUri(existing),
+      id: existing.id,
+      size: existing.size_bytes,
+      hash: existing.content_hash,
+      deduplicated: true,
+    });
+  }
 
   const record: ArtifactRecord = {
     id,
