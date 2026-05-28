@@ -7,8 +7,8 @@
  +---------------------------------------------------------+
  |  Browser                                                |
  |    http://localhost:3100  (Paperclip UI)                 |
- |    http://localhost:8081  (CEO bridge, debug)            |
- |    http://localhost:8082  (Researcher bridge, debug)     |
+ |    http://localhost:8081  (CEO agent, debug)             |
+ |    http://localhost:8082  (Researcher agent, debug)      |
  +---------------------------------------------------------+
         |               |               |
         | :3100         | :8081         | :8082
@@ -18,11 +18,11 @@
  |                                                         |
  |  +-------------+    HTTP POST /invoke     +---------+   |
  |  |  Paperclip  | -----------------------> |   CEO   |   |
- |  |  Server     |    http://ceo:8080       | bridge  |   |
+ |  |  Server     |    http://ceo:8080       | server  |   |
  |  |             |                          +---------+   |
  |  |  :3100      |    HTTP POST /invoke     +----------+  |
  |  |  (includes  | -----------------------> |Researcher|  |
- |  |   Discord   |  http://researcher:8080  |  bridge  |  |
+ |  |   Discord   |  http://researcher:8080  |  server  |  |
  |  |   plugin)   |                          +----------+  |
  |  |             |                                        |
  |  |             |--- Discord API -----> Discord Server   |
@@ -40,14 +40,16 @@
 - Mode: `authenticated` with `private` exposure
 - Persistent data: `paperclip-data` volume at `/paperclip`
 
-### Agent Bridge Containers (CEO, Researcher, Coder, Data, Writer, QA)
+### Agent Server Containers (CEO, Researcher, Data, Writer)
 
-- Image: Custom, built from shared `Dockerfile` (node:22-slim + Pi CLI)
-- Role: HTTP-to-RPC translation layer between Paperclip and Pi
-- Persistent Pi process with FIFO request queue: one Pi process per container, reused across invocations
-- Each container runs `bridge.mjs` as its entrypoint
-- Pi extensions loaded natively by Pi from `/root/.pi/agent/extensions/`: web-search, web-fetch, escalate (v2, local/discord backend), web-scrape, paperclip, artifacts, logging
-- Paperclip behavioral skills loaded via Pi's native `--skill` flag: paperclip (heartbeat protocol), paperclip-converting-plans-to-tasks, para-memory-files
+- Image: Custom, built from shared `Dockerfile` (node:22-slim + Pi SDK)
+- Role: HTTP server using Pi SDK's `AgentSession` API — no subprocess, no RPC
+- Each container runs `server.mjs` as its entrypoint
+- Shared services initialized once at boot (~1-2s): extension loading, auth, model registry, settings
+- Fresh `AgentSession` per /invoke request (~1-2ms) via `createAgentSessionFromServices`
+- FIFO request queue serializes concurrent invocations (one prompt at a time)
+- Pi extensions loaded by SDK's `DefaultResourceLoader` from `/root/.pi/agent/extensions/`
+- Paperclip behavioral skills loaded by SDK from `/root/.pi/agent/skills/`
 - pi-otel installed for automatic OTel tracing (pi.interaction → pi.turn → pi.llm_request / pi.tool.* spans)
 
 ### Discord Plugin (paperclip-plugin-discord v0.7.3)
@@ -60,12 +62,12 @@
 - Runs 5 scheduled jobs: intelligence scan, escalation timeout, watch check, budget threshold, daily digest
 - Configuration stored via `POST /api/plugins/{id}/config` with Discord bot token (stored as a Paperclip secret), channel ID, and guild ID
 
-### Pi CLI
+### Pi SDK
 
-- Installed globally in agent containers via `@earendil-works/pi-coding-agent`
-- Runs in RPC mode (`--mode rpc --no-session`)
-- Communicates via JSONL over stdin/stdout
-- Persistent process: spawned once at bridge startup, supports multiple prompt cycles via `new_session` command
+- Package: `@earendil-works/pi-coding-agent` (installed globally in agent containers)
+- Used as an embedded library via `createAgentSessionFromServices`, not as a CLI subprocess
+- `DefaultResourceLoader` auto-discovers extensions from `/root/.pi/agent/extensions/` and skills from `/root/.pi/agent/skills/`
+- `AuthStorage` resolves auth.json, `ModelRegistry` resolves models.json, `SettingsManager` resolves settings.json
 - Provider and model configured per-container via environment variables
 
 ## Docker Networking
@@ -82,32 +84,30 @@ Paperclip registers agent adapter URLs using internal addresses (`http://ceo:808
 
 ## Container Lifecycle
 
-`docker-compose.yml` manages all three containers. Agent containers depend on Paperclip (`service_started` condition). All containers have `restart: unless-stopped`.
+`docker-compose.yml` manages all containers. Agent containers depend on Paperclip (`service_healthy` condition). All containers have `restart: unless-stopped`.
 
-Agent containers run a persistent Pi process that stays alive across requests. The bridge spawns Pi once at startup and serializes requests through an in-memory FIFO queue. Between requests, a `new_session` command resets the conversation context while keeping extensions and provider connections loaded. If Pi crashes, the bridge respawns it with exponential backoff. Workspace volumes exist for Pi to read/write files during execution but are not critical state.
+Agent containers initialize Pi SDK shared services at startup (~1-2s for CEO with 12 extensions, ~2s for researcher/data with 29 extensions). Each /invoke request creates a fresh AgentSession (~1-2ms) with isolated conversation context. No subprocess management, no crash recovery needed — Pi runs in-process.
 
-Resource limits: agent containers are capped at 512MB memory.
+Resource limits: agent containers are capped at 512MB memory (data: 2G, writer: 1G).
 
 ## Data Flow
 
 ```
-Paperclip                    Bridge Container               Pi Process (persistent)
+Paperclip                    Agent Server                   Pi SDK (in-process)
    |                              |                            |
-   |                              |--- spawn pi (at startup) ->|
-   |                              |<-- extension_ui_request ---|  (extensions load once)
-   |                              |<-- ready ------------------|
+   |                              |--- initServices() -------->|
+   |                              |    (boot, ~1-2s once)      |
+   |                              |<-- services ready ---------|
    |                              |                            |
    |--- POST /invoke ----------->|                            |
-   |    {agentId, runId, context}|--- enqueue, then prompt --->|
+   |    {agentId, runId, context}|--- createSession(services)->|  (~1-2ms)
+   |                              |--- session.prompt(text) --->|
    |                              |                            |
-   |                              |<-- agent_start ------------|
-   |                              |<-- message_update(s) ------|
-   |                              |<-- agent_end --------------|
+   |                              |<-- subscribe events -------|
+   |                              |    (message_update, etc.)  |
+   |                              |<-- prompt() resolves ------|
    |                              |                            |
-   |                              |--- new_session ----------->|
-   |                              |<-- new_session_ack --------|
-   |                              |                            |
-   |<-- 200 {output, events} ----|          (Pi stays alive)   |
+   |<-- 200 {output, events} ----|    (session discarded)      |
 ```
 
 ## Agent Configuration
@@ -128,7 +128,7 @@ The `config.yml` defines model roles (smol, default, agentic, plan, review, comm
 
 ## Extension Architecture
 
-Pi extensions are TypeScript files discovered natively by Pi from `/root/.pi/agent/extensions/`. Pi loads flat `*.ts` files and `*/index.ts` subdirectory entry points. The bridge no longer passes `-e` flags; discovery is handled entirely by Pi at startup.
+Pi extensions are TypeScript files discovered by the SDK's `DefaultResourceLoader` from `/root/.pi/agent/extensions/`. It loads flat `*.ts` files and `*/index.ts` subdirectory entry points.
 
 ```
 /root/.pi/agent/extensions/  All extensions (custom tools + Paperclip platform tools)
@@ -137,17 +137,13 @@ Pi extensions are TypeScript files discovered natively by Pi from `/root/.pi/age
     index.ts                 40 tools matching upstream MCP server (issues, comments,
                              documents, agents, projects, goals, interactions, approvals,
                              workspace runtime, escape hatch)
-  paperclip-skills/          Behavioral skills (SKILL.md files from Paperclip repo)
-    paperclip/               Core heartbeat protocol + 5 reference docs
-    paperclip-converting-plans-to-tasks/  Plan decomposition into issue trees
-    para-memory-files/       PARA-method persistent memory + schema reference
 ```
 
 The Paperclip tools extension exists because the HTTP adapter does not inject MCP tools automatically. Local adapters (claude_local, pi_local) get these tools via a built-in MCP server subprocess. HTTP adapter agents must call the REST API directly, which is what the tools extension does.
 
-The Paperclip behavioral skills exist for the same reason — local adapters get them via `syncSkills` (symlinked into agent CLI discovery path). HTTP adapter agents don't. setup.sh fetches SKILL.md files from GitHub and bridge.mjs loads them via Pi's native `--skill` flag with progressive disclosure (only descriptions in context until the agent needs full content).
+### Paperclip Behavioral Skills
 
-Extensions can import from relative paths (e.g., `extensions/paperclip/index.ts` imports from `./_client.js`). Pi resolves these at load time.
+Skills are discovered by the SDK from `/root/.pi/agent/skills/`. setup.sh fetches SKILL.md files from GitHub and the Dockerfile copies them into the SDK discovery path. Pi loads skills with progressive disclosure (only descriptions in context until the agent needs full content).
 
 ### Standardized Work Products (workproduct/)
 

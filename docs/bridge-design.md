@@ -1,8 +1,10 @@
-# Bridge HTTP Server Design
+# Bridge HTTP Server Design (DEPRECATED)
+
+> **Superseded by server.mjs (v3.0.0)** which uses Pi SDK's `AgentSession` API directly — no subprocess, no RPC, no JSONL parsing. See `docs/architecture.md` for the current design.
 
 ## Overview
 
-`bridge.mjs` is a zero-dependency Node.js HTTP server that translates between Paperclip's HTTP adapter protocol and Pi's JSONL RPC protocol. One instance per agent container. The bridge maintains a single persistent Pi process and serializes requests through a FIFO queue.
+`bridge.mjs` was a zero-dependency Node.js HTTP server that translated between Paperclip's HTTP adapter protocol and Pi's JSONL RPC protocol. One instance per agent container. The bridge maintained a single persistent Pi process and serialized requests through a FIFO queue.
 
 ## Endpoints
 

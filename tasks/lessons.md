@@ -220,3 +220,34 @@ Patterns and corrections from implementation cycles. Review before starting work
 **Fix:** server.mjs replaces bridge.mjs. 260 lines. `node:http` + Pi SDK. No subprocess, no JSONL parsing, no crash recovery, no RPC protocol. `session.prompt(text)` is a single await that handles agent_start, tool execution, turns, and agent_end internally.
 
 **Rule:** When integrating any CLI tool into a server, check for a programmatic SDK/library export before building subprocess wrappers. Read the package.json `exports` field. Check `{tool}.dev/docs` for an SDK page. The presence of a `bin` field does not mean CLI is the only interface — most modern tools are library-first, CLI-second.
+
+---
+
+## 2026-05-28: mktemp paths break curl cookie jars on Windows Git Bash
+
+**What happened:** setup.sh used `mktemp` for the curl cookie jar. On MSYS/Git Bash, mktemp produces `/c/Users/...` paths. curl on Windows silently fails to write Set-Cookie headers to these paths — the cookie file stays empty. All subsequent API calls fail with 403 "Board access required" because the auth session cookie is never persisted. setup.sh appeared to hang at "Creating company..." because `api_get` returned an error body that the script didn't expect.
+
+**Root cause:** MSYS path translation. `mktemp` returns a POSIX-style path that MSYS tools understand but Windows-native curl does not. The cookie jar write failure is silent — no error, no warning, just an empty file.
+
+**Fix:** Use `$TEMP` (Windows-native path like `C:\Users\...\Temp`) for the cookie jar when `$TEMP` is set:
+```bash
+if [[ -n "${TEMP:-}" ]]; then
+  COOKIE_JAR="${TEMP}/paperclip-setup-cookies-$$.txt"
+else
+  COOKIE_JAR="$(mktemp)"
+fi
+```
+
+**Rule:** On Windows Git Bash, never use mktemp paths for files that Windows-native tools (curl, etc.) need to write. Use `$TEMP` or `$USERPROFILE` to get a Windows-native path. Test cookie persistence by checking the cookie file is non-empty after a Set-Cookie response.
+
+---
+
+## 2026-05-28: setup.sh bootstrap skipped invite acceptance on re-run
+
+**What happened:** First run of setup.sh after a fresh DB wipe created the bootstrap invite and printed the token, but the invite acceptance failed silently (cookie jar issue above). On subsequent runs, `bootstrap-invite.cjs` saw the existing unexpired invite and printed "already exists." setup.sh caught that string and returned early — never attempting to accept the invite. Paperclip stayed in `bootstrapStatus: "bootstrap_pending"` indefinitely, blocking company creation.
+
+**Root cause:** The bootstrap function's "already exists" path assumed the invite had already been accepted. It checked for invite existence, not acceptance status.
+
+**Fix:** Check `GET /api/health` for `bootstrapStatus` first. If already "ready", skip bootstrap entirely. If "bootstrap_pending", delete any stale invites from Postgres and create a fresh one with a known raw token. This ensures we always have a token we can accept, regardless of prior partial failures.
+
+**Rule:** Idempotent setup functions must check the actual system state (health endpoint, DB state), not infer it from artifacts of previous runs (invite existence). A created-but-unaccepted invite is not "bootstrap done."

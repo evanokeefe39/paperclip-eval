@@ -1,5 +1,19 @@
 # CLAUDE.md
 Never use powershell
+## Paperclip docs
+
+Official docs: https://docs.paperclip.ing/#/
+Raw markdown: strip `#/` and append `.md` (e.g. `https://docs.paperclip.ing/guides/agent-developer/heartbeat-protocol.md`)
+GitHub nav index: `https://raw.githubusercontent.com/paperclipai/paperclip/master/docs/docs.json`
+
+Key pages for agent lifecycle:
+- `guides/agent-developer/heartbeat-protocol.md` — 9-step heartbeat procedure (the core contract)
+- `guides/agent-developer/how-agents-work.md` — execution model, env vars, session persistence
+- `guides/agent-developer/task-workflow.md` — checkout, delegation, confirmation patterns
+- `guides/board-operator/delegation.md` — CEO delegation flow, troubleshooting
+- `agents-runtime.md` — heartbeat config fields, wake types, adapter overview
+- `adapters/http.md` — HTTP adapter (fire-and-forget webhook)
+
 ## What this is
 
 Evaluation repo for running Paperclip agent orchestration with Pi agents via Docker containers on Windows. Workaround for the pi_local adapter's CLI argument length limit (see LEARNING.md).
@@ -144,7 +158,7 @@ Evaluation. Validating Paperclip + Pi orchestration patterns before committing t
 - On Docker network: Paperclip reaches agents at http://ceo:8080, http://researcher:8080
 - Agents registered via HTTP adapter, not pi_local (bypasses CLI arg length limit)
 - Pi runs in RPC mode inside containers — JSONL over stdin/stdout
-- bridge.mjs translates between HTTP POST and Pi's JSONL protocol
+- server.mjs uses Pi SDK AgentSession (in-process, no subprocess)
 - Pi requires auth.json at ~/.pi/agent/auth.json inside containers (provider-specific structure for minimax/deepseek)
 - First-time setup: `bash src/agents/setup.sh` (works from Git Bash, WSL, or PowerShell via `setup.ps1`). Subsequent starts: `docker compose up -d`
 - Docker Compose project name pinned to `paperclip-eval` via `name:` key — safe to rename/move the repo directory

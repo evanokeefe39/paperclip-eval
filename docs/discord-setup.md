@@ -158,7 +158,7 @@ Response should show `status: "active"`. If it shows `"ready"`, the config is mi
 
 ## How Escalation Routing Works
 
-The `escalate` Pi extension (`src/agents/extensions/escalate.ts`) provides a single `escalate` tool to all agents. It is loaded in every agent container via `bridge.mjs`. The backend it targets switches based on whether `PAPERCLIP_DISCORD_PLUGIN_ID` is set in the environment.
+The `escalate` Pi extension (`src/agents/extensions/escalate.ts`) provides a single `escalate` tool to all agents. It is loaded in every agent container via Pi SDK extension auto-discovery. The backend it targets switches based on whether `PAPERCLIP_DISCORD_PLUGIN_ID` is set in the environment.
 
 ### Local mode (no Discord)
 
@@ -222,7 +222,7 @@ After setup, verify each item:
 
 **401 on plugin tool execute.** The board API key secret is missing. Create it via `POST /api/agents/{agentId}/keys` and store as a Paperclip secret, then reference it in `paperclipBoardApiKeyRef`.
 
-**`escalate` tool missing from agent.** Rebuild containers: `docker compose build && docker compose up -d`. The extension is loaded via `-e /app/extensions/escalate.ts` in `bridge.mjs` spawn args.
+**`escalate` tool missing from agent.** Rebuild containers: `docker compose build && docker compose up -d`. The extension is auto-discovered by Pi SDK from `/root/.pi/agent/extensions/escalate.ts`.
 
 **Escalation goes to Paperclip UI instead of Discord.** `PAPERCLIP_DISCORD_PLUGIN_ID` is not set in the container environment. Add it to `src/agents/.env` and restart: `docker compose up -d`.
 

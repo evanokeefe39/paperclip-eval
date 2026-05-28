@@ -4,7 +4,7 @@
 
 The `pi_local` adapter assembles the entire system prompt (AGENTS.md + execution contract + wake payload + continuation summary) as a CLI argument. On Windows, this hits the ~8,191 character `cmd.exe` limit. Even on Linux, the payload grows with each heartbeat as continuation summaries accumulate.
 
-The HTTP adapter avoids this entirely: prompts are sent as JSON POST bodies with no size constraint. This is the primary reason this project uses Docker containers running bridge.mjs rather than the built-in pi_local adapter.
+The HTTP adapter avoids this entirely: prompts are sent as JSON POST bodies with no size constraint. This is the primary reason this project uses Docker containers running server.mjs (Pi SDK AgentSession) rather than the built-in pi_local adapter.
 
 References: Paperclip issues [#3114](https://github.com/paperclipai/paperclip/issues/3114), [#3180](https://github.com/paperclipai/paperclip/issues/3180).
 
@@ -140,7 +140,7 @@ Paperclip runs in `authenticated` mode with `private` exposure:
 | /api/approvals/{id}/comments                                | POST   | Add approval comment           |
 | /api/execution-workspaces/{id}/runtime-services/{action}    | POST   | Control workspace services     |
 
-### Used by bridge.mjs (cost reporting)
+### Used by server.mjs (cost reporting)
 
 | Endpoint                                                    | Method | Purpose                        |
 |-------------------------------------------------------------|--------|--------------------------------|
@@ -213,9 +213,9 @@ Local adapters receive these skills automatically via `syncSkills` (symlinked in
 ### How this project provides skills to HTTP adapter agents
 
 1. `setup.sh` fetches SKILL.md files (and their reference documents) from `github.com/paperclipai/paperclip/master/skills/` into `src/agents/skills/paperclip-skills/`
-2. The Dockerfile copies them into containers at `/app/skills/paperclip-skills/`
-3. `bridge.mjs` passes `--skill /app/skills/paperclip-skills/{name}` for each skill to Pi's spawn args
-4. Pi loads skills natively with progressive disclosure: only the skill's `description` from frontmatter is injected into context; the full SKILL.md content is loaded on demand when the agent decides the skill is relevant
+2. The Dockerfile copies them into `/root/.pi/agent/skills/` (the SDK's discovery path)
+3. Pi SDK's `DefaultResourceLoader` discovers skills automatically at session creation
+4. Pi loads skills with progressive disclosure: only the skill's `description` from frontmatter is injected into context; the full SKILL.md content is loaded on demand when the agent decides the skill is relevant
 
 ### Skills loaded
 
@@ -339,6 +339,6 @@ Both backends use the shared `extensions/paperclip/_client.ts` API client for au
 
 ## Heartbeat and Health Checks
 
-Paperclip periodically pings `/health` on registered agent URLs to verify they are reachable. The bridge responds with status, uptime, and configuration metadata. If an agent becomes unreachable, Paperclip marks it unavailable for task assignment.
+Paperclip periodically pings `/health` on registered agent URLs to verify they are reachable. The server responds with status, uptime, and configuration metadata. If an agent becomes unreachable, Paperclip marks it unavailable for task assignment.
 
-Docker's own HEALTHCHECK (defined in the Dockerfile) independently monitors bridge availability with a 10-second interval and 15-second start period.
+Docker's own HEALTHCHECK (defined in the Dockerfile) independently monitors server availability with a 10-second interval and 15-second start period.

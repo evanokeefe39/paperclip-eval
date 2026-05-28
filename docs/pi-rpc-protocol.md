@@ -1,8 +1,10 @@
-# Pi RPC Protocol
+# Pi RPC Protocol (DEPRECATED)
+
+> **No longer used.** server.mjs (v3.0.0) uses Pi SDK's `AgentSession` API in-process. The RPC protocol below documents the subprocess approach used by bridge.mjs v1.x-v2.x, kept for historical reference.
 
 ## Overview
 
-Pi runs as a subprocess in RPC mode, communicating via JSONL (newline-delimited JSON) over stdin/stdout. In persistent mode (bridge v2.0.0), a single Pi process handles multiple prompt-response cycles. Between cycles, the bridge sends a `new_session` command that resets the conversation context while keeping the process and loaded extensions alive.
+Pi ran as a subprocess in RPC mode, communicating via JSONL (newline-delimited JSON) over stdin/stdout. In persistent mode (bridge v2.0.0), a single Pi process handled multiple prompt-response cycles. Between cycles, the bridge sent a `new_session` command that reset the conversation context while keeping the process and loaded extensions alive.
 
 ## Spawn Arguments
 
