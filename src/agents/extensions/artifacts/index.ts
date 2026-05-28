@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as client from "./lib/artifact-client.js";
+import * as client from "./client.js";
 
 const TEMPLATES_ROOT = "/root/.pi/agent/extensions/workproduct-lib/templates";
 

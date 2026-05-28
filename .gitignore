@@ -37,9 +37,9 @@ tests/results/
 # Spikes (scratch experiments)
 spikes/
 
-# Aritfacts
+# Artifacts (root bind-mount dir)
 .artifacts
-artifacts
+/artifacts
 
 # Paperclip skills (fetched from GitHub at setup time)
 src/agents/skills/paperclip-skills/
