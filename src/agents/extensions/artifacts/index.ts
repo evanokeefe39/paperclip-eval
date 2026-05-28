@@ -67,7 +67,7 @@ export default function (pi: ExtensionAPI) {
             ...(params.issue_id ? { issue_id: params.issue_id } : {}),
             ...(params.goal_id ? { goal_id: params.goal_id } : {}),
           },
-          run_id: params.run_id,
+          run_id: params.run_id || process.env.PAPERCLIP_RUN_ID,
           project_id: params.project_id,
         });
         const text = `Artifact written.\nRef: ${result.ref}\nID: ${result.id}\nSize: ${result.size} bytes\nHash: ${result.hash}`;
