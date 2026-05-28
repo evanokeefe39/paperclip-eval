@@ -74,6 +74,10 @@ const metrics = {
   last_request_at: null,
 };
 
+// --- Invocation busy flag (non-blocking) ---
+
+let invocationBusy = false;
+
 // --- Server ---
 
 const server = http.createServer(async (req, res) => {
@@ -82,6 +86,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({
       status: "ok",
+      busy: invocationBusy,
       uptime_s: Math.floor((Date.now() - startTime) / 1000),
       version: VERSION,
       config: {
@@ -114,6 +119,19 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
+  // Non-blocking busy check: if a Pi process is already running, reject
+  // immediately instead of queuing behind a lock. Paperclip's HTTP adapter
+  // has a 10-second timeout — waiting would always exceed it.
+  if (invocationBusy) {
+    log("warn", "invoke_rejected_busy", { reason: "Pi process already running" });
+    res.writeHead(503, {
+      "Content-Type": "application/json",
+      "Retry-After": "30",
+    });
+    return res.end(JSON.stringify({ error: "agent_busy", detail: "Pi process is currently running" }));
+  }
+  invocationBusy = true;
+
   const requestStart = Date.now();
   const traceId = randomUUID().replace(/-/g, "");
   const spanId = randomUUID().replace(/-/g, "").slice(0, 16);
@@ -140,6 +158,7 @@ const server = http.createServer(async (req, res) => {
     log("info", "request_received", { payload_size: rawBody.length });
 
     if (!rawBody) {
+      invocationBusy = false;
       metrics.requests_active--;
       metrics.requests_failed++;
       log("error", "pi_error", { error: "empty body" });
@@ -149,6 +168,7 @@ const server = http.createServer(async (req, res) => {
 
     body = JSON.parse(rawBody);
   } catch (err) {
+    invocationBusy = false;
     metrics.requests_active--;
     metrics.requests_failed++;
     log("error", "pi_error", { error: "invalid JSON", detail: err.message });
@@ -219,6 +239,7 @@ const server = http.createServer(async (req, res) => {
       env: { ...process.env, TRACEPARENT: traceparent, ...(runId ? { PAPERCLIP_RUN_ID: runId } : {}) },
     });
   } catch (err) {
+    invocationBusy = false;
     metrics.requests_active--;
     metrics.requests_failed++;
     log("error", "pi_error", { error: "spawn failed", detail: err.message });
@@ -316,6 +337,7 @@ const server = http.createServer(async (req, res) => {
       });
     });
   } catch (err) {
+    invocationBusy = false;
     metrics.requests_active--;
     metrics.requests_failed++;
     const isTimeout = err.message.includes("timeout");
@@ -352,6 +374,7 @@ const server = http.createServer(async (req, res) => {
       });
     });
   } catch (err) {
+    invocationBusy = false;
     metrics.requests_active--;
     metrics.requests_failed++;
     log("error", "pi_error", { error: err.message, stderr: stderrOutput });
@@ -384,6 +407,8 @@ const server = http.createServer(async (req, res) => {
   if (stderrOutput) {
     log("warn", "pi_error", { error: "stderr output", stderr: stderrOutput });
   }
+
+  invocationBusy = false;
 
   reportCostEvent(usage).catch(() => {});
 
