@@ -1,41 +1,34 @@
 import { createHash } from "node:crypto";
-import * as client from "../lib/artifact-client.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { Finding, SessionMeta, SubQuery, EngineState } from "./types.js";
 import type { Config } from "./config.js";
 
-export async function initSession(_sessionId: string, _query: string, _config: Config): Promise<void> {
-  // buckets managed by infrastructure — no local dirs to create
+export async function initSession(sessionId: string, _query: string, _config: Config): Promise<void> {
+  const base = path.join(process.cwd(), "deep-research", sessionId);
+  fs.mkdirSync(path.join(base, "findings"), { recursive: true });
+  fs.mkdirSync(path.join(base, "pages"), { recursive: true });
 }
 
 export async function streamFinding(finding: Finding, sessionId: string, _config: Config): Promise<void> {
-  await client.write({
-    filename: `finding-${finding.id}.json`,
-    content: JSON.stringify(finding),
-    type: "research",
-    bucket: "artifacts",
-    mime: "application/json",
-    metadata: {
-      session_id: sessionId,
-      claim_preview: finding.claim_preview,
-      confidence: finding.confidence,
-      source_url: finding.source_url,
-      topic_tags: finding.topic_tags,
-      entities: finding.entities,
-    },
-  });
+  const dir = path.join(process.cwd(), "deep-research", sessionId, "findings");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, `finding-${finding.id}.json`),
+    JSON.stringify(finding, null, 2)
+  );
 }
 
 export async function storePage(sessionId: string, url: string, content: string, _config: Config): Promise<string> {
   const hash = createHash("sha256").update(url).digest("hex").slice(0, 16);
-  const result = await client.write({
-    filename: `page-${hash}.md`,
-    content: `<!-- Source: ${url} -->\n<!-- Captured: ${new Date().toISOString()} -->\n\n${content}`,
-    type: "research",
-    bucket: "artifacts",
-    mime: "text/markdown",
-    metadata: { session_id: sessionId, source_url: url },
-  });
-  return result.ref;
+  const dir = path.join(process.cwd(), "deep-research", sessionId, "pages");
+  fs.mkdirSync(dir, { recursive: true });
+  const filename = `page-${hash}.md`;
+  fs.writeFileSync(
+    path.join(dir, filename),
+    `<!-- Source: ${url} -->\n<!-- Captured: ${new Date().toISOString()} -->\n\n${content}`
+  );
+  return filename;
 }
 
 export async function writeSessionMeta(
@@ -56,14 +49,9 @@ export async function writeSessionMeta(
     iterations: state.iteration,
     config: { max_iterations: config.max_iterations, max_sub_queries: config.max_sub_queries },
   };
-  await client.write({
-    filename: `session-${sessionId}-meta.json`,
-    content: JSON.stringify(meta, null, 2),
-    type: "session",
-    bucket: "artifacts",
-    mime: "application/json",
-    metadata: { session_id: sessionId, query },
-  });
+  const base = path.join(process.cwd(), "deep-research", sessionId);
+  fs.mkdirSync(base, { recursive: true });
+  fs.writeFileSync(path.join(base, "session-meta.json"), JSON.stringify(meta, null, 2));
 }
 
 export async function buildSessionSummary(
@@ -109,14 +97,9 @@ export async function buildSessionSummary(
   const summary = lines.join("\n");
 
   try {
-    await client.write({
-      filename: `session-${sessionId}-summary.md`,
-      content: summary,
-      type: "research",
-      bucket: "artifacts",
-      mime: "text/markdown",
-      metadata: { session_id: sessionId, query },
-    });
+    const base = path.join(process.cwd(), "deep-research", sessionId);
+    fs.mkdirSync(base, { recursive: true });
+    fs.writeFileSync(path.join(base, "session-summary.md"), summary);
   } catch {
     // Non-critical — summary is returned to agent regardless
   }
