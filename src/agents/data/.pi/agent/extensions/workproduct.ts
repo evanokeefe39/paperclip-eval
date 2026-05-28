@@ -1,6 +1,8 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-import * as client from "./artifact-client.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { ulid } from "./workproduct-lib/ulid.js";
 import { validateByStyle, type StyleProfiles } from "./workproduct-lib/validate.js";
 import { ArtifactRef, ISODate } from "./workproduct-lib/schemas.js";
 
@@ -23,6 +25,8 @@ const KIND_PROFILES: StyleProfiles = {
 const DATA_KINDS = ["dataset_ref", "query_result", "metric", "chart"] as const;
 type DataKind = (typeof DATA_KINDS)[number];
 
+const AGENT_NAME = process.env.AGENT_NAME || "unknown";
+
 function getSessionId(): string {
   return process.env.PAPERCLIP_RUN_ID || process.env.SESSION_ID || "default";
 }
@@ -38,12 +42,76 @@ function asError(msg: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Local filesystem storage helpers
+// ---------------------------------------------------------------------------
+function getWorkDir(): string {
+  return path.join(process.cwd(), "workproduct", "data");
+}
+
+function ensureDir(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+interface LocalRecord {
+  id: string;
+  agent: string;
+  type: string;
+  filename: string;
+  timestamp: string;
+  content: string;
+  metadata: Record<string, unknown>;
+}
+
+function writeLocal(type: string, filename: string, content: string, metadata: Record<string, unknown>): { id: string } {
+  const dir = getWorkDir();
+  ensureDir(dir);
+  const id = ulid();
+  const record: LocalRecord = {
+    id,
+    agent: AGENT_NAME,
+    type,
+    filename,
+    timestamp: new Date().toISOString(),
+    content,
+    metadata,
+  };
+  fs.writeFileSync(path.join(dir, `${id}-${type}.json`), JSON.stringify(record, null, 2));
+  return { id };
+}
+
+function readLocal(id: string): LocalRecord | null {
+  const dir = getWorkDir();
+  if (!fs.existsSync(dir)) return null;
+  const files = fs.readdirSync(dir);
+  const match = files.find(f => f.startsWith(id));
+  if (!match) return null;
+  return JSON.parse(fs.readFileSync(path.join(dir, match), "utf8"));
+}
+
+function listLocal(filters?: { type?: string; session_id?: string; since?: string }): LocalRecord[] {
+  const dir = getWorkDir();
+  if (!fs.existsSync(dir)) return [];
+  const files = fs.readdirSync(dir).filter(f => f.endsWith(".json"));
+  const records: LocalRecord[] = [];
+  for (const f of files) {
+    try {
+      const rec = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")) as LocalRecord;
+      if (filters?.type && rec.type !== filters.type) continue;
+      if (filters?.session_id && rec.metadata.session_id !== filters.session_id) continue;
+      if (filters?.since && rec.timestamp < filters.since) continue;
+      records.push(rec);
+    } catch { /* skip corrupt files */ }
+  }
+  return records.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
+
+// ---------------------------------------------------------------------------
 // Extension entry point — self-gates to the data agent only.
 // ---------------------------------------------------------------------------
 export default function (pi: ExtensionAPI) {
-  if (client.getAgentName() !== "data") {
-    if (client.getAgentName()) {
-      console.warn("[workproduct] data extension loaded in wrong agent:", client.getAgentName());
+  if (AGENT_NAME !== "data") {
+    if (AGENT_NAME) {
+      console.warn("[workproduct] data extension loaded in wrong agent:", AGENT_NAME);
     }
     return;
   }
@@ -105,30 +173,22 @@ export default function (pi: ExtensionAPI) {
           as_of: params.as_of,
         });
 
-        const result = await client.write({
-          type: "dataset_ref",
-          bucket: "artifacts",
-          filename: "dataset_ref.json",
-          mime: "application/json",
-          content: manifest,
-          metadata: {
-            source: params.source,
-            table: params.table,
-            path: params.path,
-            filters: params.filters,
-            columns: params.columns,
-            row_count_estimate: params.row_count_estimate,
-            schema_hash: params.schema_hash,
-            as_of: params.as_of,
-            caveats: params.caveats,
-            topic_tags: params.topic_tags,
-            related_artifacts: params.related_artifacts,
-            session_id: getSessionId(),
-          },
-          run_id: getSessionId(),
+        const result = writeLocal("dataset_ref", "dataset_ref.json", manifest, {
+          source: params.source,
+          table: params.table,
+          path: params.path,
+          filters: params.filters,
+          columns: params.columns,
+          row_count_estimate: params.row_count_estimate,
+          schema_hash: params.schema_hash,
+          as_of: params.as_of,
+          caveats: params.caveats,
+          topic_tags: params.topic_tags,
+          related_artifacts: params.related_artifacts,
+          session_id: getSessionId(),
         });
 
-        const lines = [`Dataset reference recorded.`, `ID: ${result.id}`, `Ref: ${result.ref}`];
+        const lines = [`Dataset reference recorded.`, `ID: ${result.id}`];
         if (warnings.length > 0) {
           lines.push("Warnings:");
           for (const w of warnings) lines.push(`  - ${w}`);
@@ -200,29 +260,21 @@ export default function (pi: ExtensionAPI) {
 
         const sqlForMeta = params.sql.length > 8192 ? params.sql.slice(0, 8192) : params.sql;
 
-        const result = await client.write({
-          type: "query_result",
-          bucket: "artifacts",
-          filename: "query_result.json",
-          mime: "application/json",
-          content: body,
-          metadata: {
-            sql: sqlForMeta,
-            engine: params.engine,
-            row_count: params.row_count,
-            materialized_at: params.materialized_at,
-            columns: params.columns,
-            result_artifact_ref: params.result_artifact_ref,
-            source_dataset_refs: params.source_dataset_refs,
-            duration_ms: params.duration_ms,
-            topic_tags: params.topic_tags,
-            inline_rows: Array.isArray(rows) ? rows.length : 0,
-            session_id: getSessionId(),
-          },
-          run_id: getSessionId(),
+        const result = writeLocal("query_result", "query_result.json", body, {
+          sql: sqlForMeta,
+          engine: params.engine,
+          row_count: params.row_count,
+          materialized_at: params.materialized_at,
+          columns: params.columns,
+          result_artifact_ref: params.result_artifact_ref,
+          source_dataset_refs: params.source_dataset_refs,
+          duration_ms: params.duration_ms,
+          topic_tags: params.topic_tags,
+          inline_rows: Array.isArray(rows) ? rows.length : 0,
+          session_id: getSessionId(),
         });
 
-        const lines = [`Query result recorded.`, `ID: ${result.id}`, `Ref: ${result.ref}`, `Rows: ${params.row_count}`];
+        const lines = [`Query result recorded.`, `ID: ${result.id}`, `Rows: ${params.row_count}`];
         if (warnings.length > 0) {
           lines.push("Warnings:");
           for (const w of warnings) lines.push(`  - ${w}`);
@@ -280,25 +332,17 @@ export default function (pi: ExtensionAPI) {
           series: params.series ?? null,
         });
 
-        const result = await client.write({
-          type: "metric",
-          bucket: "artifacts",
-          filename: `metric_${params.name}.json`,
-          mime: "application/json",
-          content: body,
-          metadata: {
-            name: params.name,
-            value: params.value,
-            unit: params.unit,
-            dimensions: params.dimensions,
-            window: params.window,
-            source_query_ref: params.source_query_ref,
-            confidence: params.confidence,
-            topic_tags: params.topic_tags,
-            entities: params.entities,
-            session_id: getSessionId(),
-          },
-          run_id: getSessionId(),
+        const result = writeLocal("metric", `metric_${params.name}.json`, body, {
+          name: params.name,
+          value: params.value,
+          unit: params.unit,
+          dimensions: params.dimensions,
+          window: params.window,
+          source_query_ref: params.source_query_ref,
+          confidence: params.confidence,
+          topic_tags: params.topic_tags,
+          entities: params.entities,
+          session_id: getSessionId(),
         });
 
         const lines = [`Metric recorded.`, `ID: ${result.id}`, `Name: ${params.name}`, `Value: ${params.value}${params.unit ? " " + params.unit : ""}`];
@@ -351,13 +395,11 @@ export default function (pi: ExtensionAPI) {
 
         const body = JSON.stringify(params.spec);
 
-        const result = await client.write({
-          type: "chart",
-          bucket: "artifacts",
-          filename: params.title ? `chart_${params.title.replace(/[^a-zA-Z0-9_-]/g, "_")}.json` : "chart.json",
-          mime: "application/json",
-          content: body,
-          metadata: {
+        const result = writeLocal(
+          "chart",
+          params.title ? `chart_${params.title.replace(/[^a-zA-Z0-9_-]/g, "_")}.json` : "chart.json",
+          body,
+          {
             chart_type: params.chart_type,
             data_ref: params.data_ref,
             dimensions: params.dimensions,
@@ -368,8 +410,7 @@ export default function (pi: ExtensionAPI) {
             topic_tags: params.topic_tags,
             session_id: getSessionId(),
           },
-          run_id: getSessionId(),
-        });
+        );
 
         const lines = [`Chart recorded.`, `ID: ${result.id}`, `Type: ${params.chart_type}`];
         if (params.title) lines.push(`Title: ${params.title}`);
@@ -407,27 +448,13 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, _signal) {
       try {
-        const agent = params.agent ?? client.getAgentName();
         const limit = params.limit ?? 50;
-        const metaFilter: Record<string, unknown> | undefined = params.session_id
-          ? { session_id: params.session_id }
-          : undefined;
 
-        const baseFilters = {
-          agent,
-          bucket: "artifacts",
-          since: params.since,
-          metadata: metaFilter,
-        };
-
-        let records: Awaited<ReturnType<typeof client.list>>;
+        let records: LocalRecord[];
         if (params.kind) {
-          records = await client.list({ ...baseFilters, type: params.kind });
+          records = listLocal({ type: params.kind, session_id: params.session_id, since: params.since });
         } else {
-          const lists = await Promise.all(
-            DATA_KINDS.map((k) => client.list({ ...baseFilters, type: k })),
-          );
-          records = lists.flat();
+          records = listLocal({ session_id: params.session_id, since: params.since });
         }
 
         // Post-filter on topic_tag / entity (metadata is JSON, not a flat scalar).
@@ -449,7 +476,6 @@ export default function (pi: ExtensionAPI) {
           });
         }
 
-        filtered.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
         const sliced = filtered.slice(0, limit);
 
         if (sliced.length === 0) {
@@ -465,7 +491,7 @@ export default function (pi: ExtensionAPI) {
             (meta as Record<string, unknown>).table as string ||
             (meta as Record<string, unknown>).path as string ||
             r.filename;
-          lines.push(`[${r.id}] ${r.artifact_type} | ${label} | ${r.created_at}`);
+          lines.push(`[${r.id}] ${r.type} | ${label} | ${r.timestamp}`);
         }
 
         return asText(lines.join("\n"), { count: sliced.length });
@@ -489,15 +515,18 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, _signal) {
       try {
-        const result = await client.read(params.id);
+        const rec = readLocal(params.id);
+        if (!rec) {
+          return asError(`no data product found with id '${params.id}'`);
+        }
         const allowed = new Set<string>(DATA_KINDS as unknown as string[]);
-        if (!allowed.has(result.metadata.artifact_type)) {
+        if (!allowed.has(rec.type)) {
           return asError(
-            `artifact ${params.id} has type '${result.metadata.artifact_type}', not a data work product (expected one of ${[...allowed].join(", ")})`,
+            `artifact ${params.id} has type '${rec.type}', not a data work product (expected one of ${[...allowed].join(", ")})`,
           );
         }
 
-        const raw = result.content.toString("utf8");
+        const raw = rec.content;
         let parsed: unknown = raw;
         try {
           parsed = JSON.parse(raw);
@@ -506,7 +535,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         const dump = JSON.stringify(
-          { record: result.metadata, content: parsed },
+          { record: rec.metadata, content: parsed },
           null,
           2,
         );
