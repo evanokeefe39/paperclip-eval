@@ -1,0 +1,214 @@
+
+══════════════════════════════════════════════════════════════════
+[E2E-19] M0.1 Milestone Evaluation
+  Run ID:        m01-20260528-222242
+  Results:       /c/Users/evano/repos/paperclip-eval/tests/e2e/../results/m01-20260528-222242
+  Max wall-clock: 2400s
+  Poll interval:  15s
+══════════════════════════════════════════════════════════════════
+
+[22:22:42] Preflight checks...
+Checking prerequisites...
+  Stack healthy.
+Authenticating...
+  Authenticated.
+[22:22:43]   CEO: 75a3af08-05c6-4e87-ae2a-225554863524
+[22:22:43]   Researcher: 395fa3c2-856d-4e1d-b44e-585ca311bf0b
+[22:22:44]   Data: c10e09fe-395c-47e8-95f6-e47af6968f83
+[22:22:44]   Writer: 3e254688-ce09-4c71-8e48-807132a9a316
+[22:22:44] Cleaning stale issues...
+[22:22:45]   No stale issues
+
+[22:22:45] Creating parent issue: M0.1 Eval: Faceless Tech Channel Analysis
+[22:22:45]   Created: EVA-11 (ce2f7709-5985-4e2f-aa76-7ce145c68471)
+
+[22:22:45] Invoking CEO heartbeat...
+{"id":"86fee321-f24c-48b4-b65f-db0aa981f9ad","companyId":"37a64e10-1d47-40ab-80c6-f96113d48abf","agentId":"75a3af08-05c6-4e87-ae2a-225554863524","invocationSource":"on_demand","triggerDetail":"manual","status":"queued","startedAt":null,"finishedAt":null,"error":null,"wakeupRequestId":"e242ac02-e14d-4ff5-9392-633cb5ab2bdf","exitCode":null,"signal":null,"usageJson":null,"resultJson":null,"sessionIdBefore":null,"sessionIdAfter":null,"logStore":null,"logRef":null,"logBytes":null,"logSha256":null,"logCompressed":false,"stdoutExcerpt":null,"stderrExcerpt":null,"errorCode":null,"externalRunId":null,"processPid":null,"processGroupId":null,"processStartedAt":null,"lastOutputAt":null,"lastOutputSeq":0,"lastOutputStream":null,"lastOutputBytes":null,"retryOfRunId":null,"processLossRetryCount":0,"scheduledRetryAt":null,"scheduledRetryAttempt":0,"scheduledRetryReason":null,"issueCommentStatus":"not_applicable","issueCommentSatisfiedByCommentId":null,"issueCommentRetryQueuedAt":null,"livenessState":null,"livenessReason":null,"continuationAttempt":0,"lastUsefulActionAt":null,"nextAction":null,"contextSnapshot":{"actorId":"SXE1RWUPYAoiRTFCjtlek5MFPAa6wWGs","wakeSource":"on_demand","triggeredBy":"board","wakeTriggerDetail":"manual"},"createdAt":"2026-05-28T20:22:45.897Z","updatedAt":"2026-05-28T20:22:45.897Z"}[22:22:46] Entering monitoring loop (poll every 15s, max 2400s)...
+[22:22:46] ────────────────────────────────────────────────────────────────
+[22:23:05]   [0s] parent=in_progress children=0 (done=0 ip=0 blocked=0 todo=0) | CEO:inv=2,busy=true,q=1 Researcher:inv=0,busy=false,q=0 Data:inv=0,busy=false,q=0 Writer:inv=-19,busy=false,q=0
+[22:23:23]   [34s] parent=in_progress children=2 (done=0 ip=2 blocked=0 todo=0) | CEO:inv=2,busy=true,q=1 Researcher:inv=2,busy=true,q=1 Data:inv=1,busy=true,q=0 Writer:inv=-19,busy=false,q=0
+[22:23:23]   New issues detected (2 total):
+[22:23:23]     EVA-13: Research: Faceless Tech Channels on Instagram [assignee=395fa3c2-856d-4e1d-b44e-585ca311bf0b, status=in_progress]
+[22:23:23]     EVA-12: Research: Faceless Tech Channels on TikTok [assignee=395fa3c2-856d-4e1d-b44e-585ca311bf0b, status=in_progress]
+[22:23:41]   [52s] parent=in_progress children=2 (done=0 ip=2 blocked=0 todo=0) | CEO:inv=2,busy=true,q=1 Researcher:inv=2,busy=true,q=1 Data:inv=1,busy=false,q=0 Writer:inv=-19,busy=false,q=0
+[22:23:58]   [70s] parent=in_progress children=2 (done=0 ip=2 blocked=0 todo=0) | CEO:inv=3,busy=true,q=1 Researcher:inv=3,busy=true,q=2 Data:inv=1,busy=false,q=0 Writer:inv=-19,busy=false,q=0
+[22:24:16]   [87s] parent=in_progress children=2 (done=0 ip=2 blocked=0 todo=0) | CEO:inv=3,busy=true,q=1 Researcher:inv=3,busy=true,q=2 Data:inv=1,busy=false,q=0 Writer:inv=-19,busy=false,q=0
+[22:24:34]   [105s] parent=in_progress children=2 (done=0 ip=2 blocked=0 todo=0) | CEO:inv=3,busy=true,q=1 Researcher:inv=3,busy=true,q=2 Data:inv=1,busy=false,q=0 Writer:inv=-19,busy=false,q=0
+[22:24:52]   [123s] parent=in_progress children=2 (done=0 ip=2 blocked=0 todo=0) | CEO:inv=3,busy=true,q=1 Researcher:inv=3,busy=true,q=2 Data:inv=1,busy=false,q=0 Writer:inv=-19,busy=false,q=0
+[22:25:09]   [141s] parent=in_progress children=5 (done=0 ip=3 blocked=2 todo=0) | CEO:inv=3,busy=true,q=1 Researcher:inv=4,busy=true,q=3 Data:inv=1,busy=false,q=0 Writer:inv=-19,busy=false,q=0
+[22:25:10]   New issues detected (5 total):
+[22:25:10]     EVA-16: [EVA-11] Writer: Final Synthesis Report — Faceless Tech Channel Analysis [assignee=3e254688-ce09-4c71-8e48-807132a9a316, status=blocked]
+[22:25:10]     EVA-15: [EVA-11] Data: Cross-Platform Comparison & Monetization Analysis [assignee=c10e09fe-395c-47e8-95f6-e47af6968f83, status=blocked]
+[22:25:10]     EVA-14: [EVA-11] Researcher: Platform-Specific Faceless Tech Channel Analysis (Instagram + TikTok) [assignee=395fa3c2-856d-4e1d-b44e-585ca311bf0b, status=in_progress]
+[22:25:10]     EVA-13: Research: Faceless Tech Channels on Instagram [assignee=395fa3c2-856d-4e1d-b44e-585ca311bf0b, status=in_progress]
+[22:25:10]     EVA-12: Research: Faceless Tech Channels on TikTok [assignee=395fa3c2-856d-4e1d-b44e-585ca311bf0b, status=in_progress]
+[22:25:28]   [159s] parent=in_progress children=5 (done=0 ip=3 blocked=2 todo=0) | CEO:inv=3,busy=true,q=1 Researcher:inv=4,busy=true,q=3 Data:inv=1,busy=false,q=0 Writer:inv=-18,busy=true,q=0
+[22:25:45]   [177s] parent=in_progress children=5 (done=1 ip=2 blocked=2 todo=0) | CEO:inv=3,busy=true,q=1 Researcher:inv=5,busy=true,q=4 Data:inv=2,busy=true,q=0 Writer:inv=-18,busy=false,q=0
+[22:26:38]   [194s] parent=in_progress children=5 (done=1 ip=2 blocked=2 todo=0) | CEO:inv=3,busy=true,q=1 Researcher:inv=-19,busy=false,q=0 Data:inv=3,busy=true,q=1 Writer:inv=-18,busy=false,q=0
+[22:26:57]   [247s] parent=in_progress children=5 (done=1 ip=0 blocked=4 todo=0) | CEO:inv=5,busy=true,q=2 Researcher:inv=-19,busy=false,q=0 Data:inv=3,busy=true,q=1 Writer:inv=-18,busy=false,q=0
+[22:27:15]   [266s] parent=in_progress children=5 (done=1 ip=0 blocked=2 todo=2) | CEO:inv=5,busy=true,q=2 Researcher:inv=-19,busy=false,q=0 Data:inv=4,busy=true,q=1 Writer:inv=-18,busy=false,q=0
+[22:27:34]   [284s] parent=blocked children=5 (done=1 ip=0 blocked=2 todo=2) | CEO:inv=6,busy=true,q=2 Researcher:inv=-19,busy=false,q=0 Data:inv=4,busy=true,q=0 Writer:inv=-18,busy=false,q=0
+[22:27:53]   [303s] parent=blocked children=5 (done=1 ip=0 blocked=2 todo=2) | CEO:inv=6,busy=true,q=2 Researcher:inv=-19,busy=false,q=0 Data:inv=4,busy=true,q=0 Writer:inv=-17,busy=true,q=0
+[22:28:12]   [322s] parent=blocked children=5 (done=1 ip=0 blocked=2 todo=2) | CEO:inv=6,busy=true,q=2 Researcher:inv=-19,busy=false,q=0 Data:inv=4,busy=true,q=0 Writer:inv=-17,busy=true,q=0
+[22:28:31]   [341s] parent=blocked children=5 (done=1 ip=0 blocked=2 todo=2) | CEO:inv=6,busy=true,q=1 Researcher:inv=-18,busy=true,q=0 Data:inv=4,busy=true,q=0 Writer:inv=-17,busy=false,q=0
+[22:28:49]   [360s] parent=blocked children=5 (done=1 ip=0 blocked=2 todo=2) | CEO:inv=6,busy=true,q=1 Researcher:inv=-18,busy=true,q=0 Data:inv=4,busy=true,q=0 Writer:inv=-17,busy=false,q=0
+[22:29:08]   [379s] parent=blocked children=5 (done=1 ip=0 blocked=2 todo=2) | CEO:inv=6,busy=true,q=1 Researcher:inv=-17,busy=true,q=1 Data:inv=4,busy=true,q=0 Writer:inv=-17,busy=false,q=0
+[22:29:28]   [398s] parent=blocked children=5 (done=1 ip=0 blocked=2 todo=2) | CEO:inv=6,busy=true,q=1 Researcher:inv=-17,busy=true,q=1 Data:inv=4,busy=true,q=0 Writer:inv=-17,busy=false,q=0
+[22:29:47]   [417s] parent=blocked children=5 (done=1 ip=0 blocked=2 todo=2) | CEO:inv=6,busy=true,q=1 Researcher:inv=-17,busy=true,q=1 Data:inv=4,busy=true,q=0 Writer:inv=-17,busy=false,q=0
+[22:30:06]   [436s] parent=blocked children=5 (done=1 ip=0 blocked=2 todo=2) | CEO:inv=6,busy=true,q=1 Researcher:inv=-17,busy=true,q=1 Data:inv=5,busy=true,q=1 Writer:inv=-17,busy=false,q=0
+[22:30:29]   [456s] parent=blocked children=5 (done=1 ip=0 blocked=2 todo=2) | CEO:inv=7,busy=true,q=2 Researcher:inv=-17,busy=true,q=1 Data:inv=5,busy=true,q=1 Writer:inv=-16,busy=true,q=0
+[22:30:48]   [478s] parent=blocked children=5 (done=1 ip=0 blocked=2 todo=2) | CEO:inv=7,busy=true,q=2 Researcher:inv=-17,busy=true,q=1 Data:inv=5,busy=true,q=1 Writer:inv=-16,busy=false,q=0
+[22:31:09]   [497s] parent=blocked children=5 (done=1 ip=1 blocked=2 todo=1) | CEO:inv=7,busy=true,q=2 Researcher:inv=-19,busy=false,q=0 Data:inv=6,busy=true,q=2 Writer:inv=-16,busy=false,q=0
+[22:31:28]   [518s] parent=blocked children=5 (done=2 ip=1 blocked=2 todo=0) | CEO:inv=7,busy=true,q=2 Researcher:inv=-19,busy=false,q=0 Data:inv=6,busy=true,q=2 Writer:inv=-16,busy=false,q=0
+[22:31:46]   [537s] parent=blocked children=5 (done=2 ip=1 blocked=2 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-19,busy=false,q=0 Data:inv=6,busy=true,q=2 Writer:inv=-16,busy=false,q=0
+[22:32:05]   [556s] parent=blocked children=5 (done=2 ip=1 blocked=2 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-19,busy=false,q=0 Data:inv=6,busy=true,q=2 Writer:inv=-16,busy=false,q=0
+[22:32:24]   [574s] parent=blocked children=5 (done=2 ip=1 blocked=2 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-19,busy=false,q=0 Data:inv=6,busy=true,q=2 Writer:inv=-16,busy=false,q=0
+[22:32:44]   [593s] parent=blocked children=5 (done=3 ip=1 blocked=1 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-19,busy=false,q=0 Data:inv=6,busy=true,q=2 Writer:inv=-16,busy=false,q=0
+[22:33:03]   [613s] parent=blocked children=5 (done=3 ip=1 blocked=1 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-19,busy=false,q=0 Data:inv=6,busy=true,q=1 Writer:inv=-15,busy=true,q=0
+[22:33:22]   [633s] parent=blocked children=5 (done=3 ip=1 blocked=1 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-19,busy=false,q=0 Data:inv=6,busy=true,q=1 Writer:inv=-15,busy=true,q=0
+[22:33:42]   [651s] parent=blocked children=5 (done=3 ip=1 blocked=1 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-18,busy=false,q=0 Data:inv=6,busy=true,q=1 Writer:inv=-15,busy=true,q=0
+[22:34:01]   [671s] parent=blocked children=5 (done=3 ip=1 blocked=1 todo=0) | CEO:inv=-18,busy=true,q=0 Researcher:inv=-18,busy=false,q=0 Data:inv=6,busy=true,q=1 Writer:inv=-15,busy=false,q=0
+[22:34:19]   [690s] parent=in_progress children=5 (done=3 ip=1 blocked=1 todo=0) | CEO:inv=-18,busy=false,q=0 Researcher:inv=-18,busy=false,q=0 Data:inv=6,busy=true,q=1 Writer:inv=-15,busy=false,q=0
+[22:34:37]   [708s] parent=in_progress children=5 (done=3 ip=1 blocked=1 todo=0) | CEO:inv=-16,busy=true,q=0 Researcher:inv=-18,busy=false,q=0 Data:inv=6,busy=true,q=1 Writer:inv=-15,busy=false,q=0
+[22:34:57]   [726s] parent=in_progress children=5 (done=3 ip=1 blocked=1 todo=0) | CEO:inv=-16,busy=true,q=0 Researcher:inv=-18,busy=false,q=0 Data:inv=6,busy=true,q=1 Writer:inv=-15,busy=false,q=0
+[22:35:16]   [746s] parent=in_progress children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-16,busy=true,q=0 Researcher:inv=-18,busy=false,q=0 Data:inv=6,busy=true,q=1 Writer:inv=-14,busy=true,q=0
+[22:35:36]   [765s] parent=in_progress children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-16,busy=true,q=0 Researcher:inv=-18,busy=false,q=0 Data:inv=6,busy=true,q=0 Writer:inv=-14,busy=true,q=0
+[22:35:55]   [785s] parent=blocked children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-15,busy=true,q=0 Researcher:inv=-17,busy=true,q=0 Data:inv=6,busy=true,q=0 Writer:inv=-14,busy=true,q=0
+[22:36:16]   [804s] parent=blocked children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-15,busy=true,q=0 Researcher:inv=-17,busy=false,q=0 Data:inv=7,busy=true,q=0 Writer:inv=-14,busy=true,q=0
+[22:36:35]   [825s] parent=in_progress children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-14,busy=true,q=0 Researcher:inv=-17,busy=false,q=0 Data:inv=7,busy=false,q=0 Writer:inv=-13,busy=true,q=1
+[22:36:55]   [844s] parent=in_progress children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-14,busy=true,q=0 Researcher:inv=-17,busy=false,q=0 Data:inv=7,busy=false,q=0 Writer:inv=-13,busy=true,q=1
+[22:37:15]   [864s] parent=in_progress children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-14,busy=true,q=0 Researcher:inv=-17,busy=false,q=0 Data:inv=7,busy=false,q=0 Writer:inv=-13,busy=true,q=1
+[22:37:34]   [884s] parent=blocked children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-13,busy=true,q=0 Researcher:inv=-17,busy=false,q=0 Data:inv=7,busy=false,q=0 Writer:inv=-13,busy=true,q=1
+[22:37:53]   [903s] parent=in_progress children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-12,busy=true,q=0 Researcher:inv=-17,busy=false,q=0 Data:inv=7,busy=false,q=0 Writer:inv=-13,busy=true,q=1
+[22:38:11]   [922s] parent=in_progress children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-12,busy=true,q=0 Researcher:inv=-17,busy=false,q=0 Data:inv=7,busy=false,q=0 Writer:inv=-13,busy=true,q=1
+[22:38:29]   [940s] parent=in_progress children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-12,busy=true,q=0 Researcher:inv=-16,busy=true,q=0 Data:inv=8,busy=true,q=0 Writer:inv=-13,busy=true,q=1
+[22:38:46]   [958s] parent=in_progress children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-12,busy=false,q=0 Researcher:inv=-16,busy=false,q=0 Data:inv=8,busy=false,q=0 Writer:inv=-13,busy=true,q=1
+[22:39:04]   [975s] parent=blocked children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-11,busy=true,q=0 Researcher:inv=-16,busy=false,q=0 Data:inv=8,busy=false,q=0 Writer:inv=-13,busy=true,q=1
+[22:39:23]   [993s] parent=in_progress children=5 (done=4 ip=1 blocked=0 todo=0) | CEO:inv=-10,busy=true,q=0 Researcher:inv=-16,busy=false,q=0 Data:inv=8,busy=false,q=0 Writer:inv=-13,busy=true,q=1
+[22:39:40]   [1012s] parent=in_progress children=6 (done=4 ip=2 blocked=0 todo=0) | CEO:inv=-9,busy=true,q=1 Researcher:inv=-16,busy=false,q=0 Data:inv=8,busy=false,q=0 Writer:inv=-13,busy=true,q=1
+[22:39:41]   New issues detected (6 total):
+[22:39:41]     EVA-17: Review productivity for EVA-11 [assignee=75a3af08-05c6-4e87-ae2a-225554863524, status=in_progress]
+[22:39:41]     EVA-16: [EVA-11] Writer: Final Synthesis Report — Faceless Tech Channel Analysis [assignee=3e254688-ce09-4c71-8e48-807132a9a316, status=in_progress]
+[22:39:41]     EVA-12: Research: Faceless Tech Channels on TikTok [assignee=c10e09fe-395c-47e8-95f6-e47af6968f83, status=done]
+[22:39:41]     EVA-13: Research: Faceless Tech Channels on Instagram [assignee=c10e09fe-395c-47e8-95f6-e47af6968f83, status=done]
+[22:39:41]     EVA-15: [EVA-11] Data: Cross-Platform Comparison & Monetization Analysis [assignee=c10e09fe-395c-47e8-95f6-e47af6968f83, status=done]
+[22:39:41]     EVA-14: [EVA-11] Researcher: Platform-Specific Faceless Tech Channel Analysis (Instagram + TikTok) [assignee=395fa3c2-856d-4e1d-b44e-585ca311bf0b, status=cancelled]
+[22:39:59]   [1030s] parent=in_progress children=6 (done=4 ip=2 blocked=0 todo=0) | CEO:inv=-9,busy=true,q=1 Researcher:inv=-16,busy=false,q=0 Data:inv=8,busy=false,q=0 Writer:inv=-13,busy=true,q=1
+[22:40:16]   [1048s] parent=in_progress children=6 (done=4 ip=2 blocked=0 todo=0) | CEO:inv=-9,busy=true,q=1 Researcher:inv=-16,busy=false,q=0 Data:inv=8,busy=false,q=0 Writer:inv=-12,busy=true,q=2
+[22:40:34]   [1065s] parent=in_progress children=6 (done=4 ip=2 blocked=0 todo=0) | CEO:inv=-9,busy=true,q=0 Researcher:inv=-16,busy=false,q=0 Data:inv=8,busy=false,q=0 Writer:inv=-12,busy=true,q=2
+[22:40:52]   [1083s] parent=in_progress children=6 (done=4 ip=2 blocked=0 todo=0) | CEO:inv=-9,busy=true,q=0 Researcher:inv=-15,busy=false,q=0 Data:inv=9,busy=true,q=0 Writer:inv=-12,busy=true,q=2
+[22:41:10]   [1101s] parent=blocked children=6 (done=4 ip=2 blocked=0 todo=0) | CEO:inv=-8,busy=true,q=1 Researcher:inv=-15,busy=true,q=0 Data:inv=9,busy=false,q=0 Writer:inv=-12,busy=true,q=2
+[22:41:27]   [1119s] parent=blocked children=6 (done=4 ip=2 blocked=0 todo=0) | CEO:inv=-7,busy=true,q=1 Researcher:inv=-15,busy=false,q=0 Data:inv=9,busy=false,q=0 Writer:inv=-12,busy=true,q=2
+[22:41:46]   [1136s] parent=blocked children=6 (done=4 ip=2 blocked=0 todo=0) | CEO:inv=-7,busy=true,q=1 Researcher:inv=-15,busy=false,q=0 Data:inv=9,busy=false,q=0 Writer:inv=-12,busy=true,q=2
+[22:42:06]   [1155s] parent=blocked children=6 (done=4 ip=2 blocked=0 todo=0) | CEO:inv=-7,busy=true,q=0 Researcher:inv=-15,busy=false,q=0 Data:inv=9,busy=false,q=0 Writer:inv=-12,busy=true,q=2
+[22:42:25]   [1175s] parent=blocked children=6 (done=4 ip=2 blocked=0 todo=0) | CEO:inv=-7,busy=true,q=0 Researcher:inv=-15,busy=false,q=0 Data:inv=9,busy=false,q=0 Writer:inv=-12,busy=true,q=2
+[22:42:44]   [1194s] parent=blocked children=6 (done=4 ip=2 blocked=0 todo=0) | CEO:inv=-7,busy=true,q=0 Researcher:inv=-15,busy=false,q=0 Data:inv=9,busy=false,q=0 Writer:inv=-12,busy=true,q=2
+[22:43:03]   [1213s] parent=blocked children=6 (done=4 ip=2 blocked=0 todo=0) | CEO:inv=-7,busy=true,q=0 Researcher:inv=-15,busy=false,q=0 Data:inv=9,busy=false,q=0 Writer:inv=-12,busy=true,q=2
+[22:43:21]   [1232s] parent=blocked children=6 (done=4 ip=2 blocked=0 todo=0) | CEO:inv=-7,busy=false,q=0 Researcher:inv=-15,busy=false,q=0 Data:inv=9,busy=false,q=0 Writer:inv=-12,busy=true,q=2
+[22:44:15]   [1251s] parent=blocked children=6 (done=4 ip=1 blocked=1 todo=0) | CEO:inv=-6,busy=true,q=0 Researcher:inv=-14,busy=false,q=0 Data:inv=10,busy=false,q=0 Writer:inv=-19,busy=false,q=0
+[22:44:35]   [1304s] parent=blocked children=6 (done=5 ip=0 blocked=1 todo=0) | CEO:inv=-5,busy=true,q=0 Researcher:inv=-14,busy=false,q=0 Data:inv=10,busy=false,q=0 Writer:inv=-19,busy=false,q=0
+[22:44:35]   WARNING: possible stall — no progress for 225s
+[22:44:54]   [1324s] parent=blocked children=6 (done=5 ip=0 blocked=1 todo=0) | CEO:inv=-5,busy=true,q=0 Researcher:inv=-14,busy=false,q=0 Data:inv=10,busy=false,q=0 Writer:inv=-19,busy=false,q=0
+[22:44:54]   WARNING: possible stall — no progress for 240s
+[22:45:13]   [1343s] parent=blocked children=6 (done=5 ip=0 blocked=1 todo=0) | CEO:inv=-5,busy=true,q=0 Researcher:inv=-14,busy=false,q=0 Data:inv=10,busy=false,q=0 Writer:inv=-19,busy=false,q=0
+[22:45:13]   WARNING: possible stall — no progress for 255s
+[22:45:33]   [1363s] parent=blocked children=6 (done=5 ip=0 blocked=1 todo=0) | CEO:inv=-5,busy=true,q=0 Researcher:inv=-14,busy=false,q=0 Data:inv=10,busy=false,q=0 Writer:inv=-19,busy=false,q=0
+[22:45:33]   WARNING: possible stall — no progress for 270s
+[22:45:53]   [1382s] parent=blocked children=6 (done=5 ip=0 blocked=1 todo=0) | CEO:inv=-5,busy=true,q=0 Researcher:inv=-13,busy=true,q=0 Data:inv=11,busy=true,q=0 Writer:inv=-19,busy=false,q=0
+[22:45:53]   WARNING: possible stall — no progress for 285s
+[22:46:13]   [1403s] parent=blocked children=6 (done=5 ip=0 blocked=1 todo=0) | CEO:inv=-5,busy=true,q=0 Researcher:inv=-13,busy=false,q=0 Data:inv=11,busy=false,q=0 Writer:inv=-19,busy=false,q=0
+[22:46:13]   WARNING: possible stall — no progress for 300s
+[22:46:34]   [1423s] parent=blocked children=6 (done=5 ip=0 blocked=1 todo=0) | CEO:inv=-4,busy=true,q=1 Researcher:inv=-13,busy=false,q=0 Data:inv=11,busy=false,q=0 Writer:inv=-18,busy=false,q=0
+[22:46:34]   WARNING: possible stall — no progress for 315s
+[22:46:54]   [1443s] parent=blocked children=6 (done=5 ip=0 blocked=1 todo=0) | CEO:inv=-4,busy=true,q=1 Researcher:inv=-13,busy=false,q=0 Data:inv=11,busy=false,q=0 Writer:inv=-18,busy=false,q=0
+[22:46:54]   WARNING: possible stall — no progress for 330s
+[22:47:14]   [1463s] parent=blocked children=6 (done=5 ip=0 blocked=1 todo=0) | CEO:inv=-4,busy=true,q=1 Researcher:inv=-13,busy=false,q=0 Data:inv=11,busy=false,q=0 Writer:inv=-18,busy=false,q=0
+[22:47:15]   WARNING: possible stall — no progress for 345s
+[22:47:35]   [1484s] parent=in_progress children=6 (done=6 ip=0 blocked=0 todo=0) | CEO:inv=-3,busy=true,q=2 Researcher:inv=-13,busy=false,q=0 Data:inv=11,busy=false,q=0 Writer:inv=-18,busy=false,q=0
+[22:47:35]   WARNING: possible stall — no progress for 360s
+[22:48:03]   [1504s] parent=in_progress children=6 (done=6 ip=0 blocked=0 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-13,busy=false,q=0 Data:inv=11,busy=false,q=0 Writer:inv=-18,busy=false,q=0
+[22:48:03]   WARNING: possible stall — no progress for 375s
+[22:48:23]   [1532s] parent=blocked children=6 (done=6 ip=0 blocked=0 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-12,busy=false,q=0 Data:inv=12,busy=true,q=0 Writer:inv=-18,busy=false,q=0
+[22:48:23]   WARNING: possible stall — no progress for 390s
+[22:48:43]   [1553s] parent=blocked children=6 (done=6 ip=0 blocked=0 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-12,busy=false,q=0 Data:inv=12,busy=false,q=0 Writer:inv=-18,busy=false,q=0
+[22:48:43]   WARNING: possible stall — no progress for 405s
+[22:49:02]   [1572s] parent=blocked children=6 (done=6 ip=0 blocked=0 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-12,busy=false,q=0 Data:inv=12,busy=false,q=0 Writer:inv=-17,busy=false,q=0
+[22:49:02]   WARNING: possible stall — no progress for 420s
+[22:49:21]   [1592s] parent=blocked children=6 (done=6 ip=0 blocked=0 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-12,busy=false,q=0 Data:inv=12,busy=false,q=0 Writer:inv=-17,busy=false,q=0
+[22:49:22]   WARNING: possible stall — no progress for 435s
+[22:49:41]   [1611s] parent=blocked children=6 (done=6 ip=0 blocked=0 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-12,busy=false,q=0 Data:inv=12,busy=false,q=0 Writer:inv=-17,busy=false,q=0
+[22:49:41]   WARNING: possible stall — no progress for 450s
+[22:50:00]   [1630s] parent=blocked children=6 (done=6 ip=0 blocked=0 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-12,busy=false,q=0 Data:inv=12,busy=false,q=0 Writer:inv=-17,busy=false,q=0
+[22:50:00]   WARNING: possible stall — no progress for 465s
+[22:50:20]   [1649s] parent=blocked children=6 (done=6 ip=0 blocked=0 todo=0) | CEO:inv=-19,busy=false,q=0 Researcher:inv=-12,busy=false,q=0 Data:inv=12,busy=false,q=0 Writer:inv=-17,busy=false,q=0
+[22:50:20]   WARNING: possible stall — no progress for 480s
+[22:50:40]   [1669s] parent=done children=6 (done=6 ip=0 blocked=0 todo=0) | CEO:inv=-18,busy=true,q=0 Researcher:inv=-12,busy=false,q=0 Data:inv=12,busy=false,q=0 Writer:inv=-17,busy=false,q=0
+[22:50:40]   Parent issue marked done at 1669s
+[22:50:40] ────────────────────────────────────────────────────────────────
+[22:50:40] Settling for 30s...
+
+[22:51:10] Running evaluation...
+
+  ▸ Wall-clock time under 40 minutes
+  Completed in 1705s (28m 25s)
+  [PASS] Wall-clock time under 40 minutes
+  ▸ Parent issue reached done status
+  [PASS] Parent issue reached done status
+  ▸ CEO created child issues (delegation occurred)
+  6 child issues created
+  [PASS] CEO created child issues (delegation occurred)
+  ▸ CEO did not self-assign research/data/writing tasks
+  CEO self-assigned 2 issues:
+    EVA-16: [EVA-11] Writer: Final Synthesis Report — Faceless Tech Channel Analysis
+    EVA-17: Review productivity for EVA-11
+  [FAIL] CEO did not self-assign research/data/writing tasks — CEO self-assigned 2 tasks (should delegate all)
+  ▸ Researcher received at least 1 task
+  1 tasks assigned
+  [PASS] Researcher received at least 1 task
+  ▸ Writer received at least 1 task
+  [FAIL] Writer received at least 1 task — no tasks assigned to Writer
+  ▸ Issue completion rate >= 60%
+  5/6 completed (83%)
+  [PASS] Issue completion rate >= 60%
+  ▸ No stale/false escalation issues
+  [PASS] No stale/false escalation issues
+  ▸ No duplicate write tasks (max 1 writing task)
+  [PASS] No duplicate write tasks (max 1 writing task)
+  ▸ Timeout rate under 20%
+  [SKIP] Timeout rate under 20% — no invocations recorded
+  ▸ Artifacts produced in MinIO
+  3 artifacts in store
+  [PASS] Artifacts produced in MinIO
+
+[22:51:15] ═══════════════════════════════════════════════════════════════
+[22:51:15] M0.1 EVALUATION REPORT
+[22:51:15] ═══════════════════════════════════════════════════════════════
+[22:51:15] 
+[22:51:15] Run ID:       m01-20260528-222242
+[22:51:15] Parent issue: EVA-11 (ce2f7709-5985-4e2f-aa76-7ce145c68471)
+[22:51:15] Duration:     1705s (28m 25s)
+[22:51:15] Parent status: done
+[22:51:15] 
+[22:51:15] ISSUES:
+[22:51:15]   Parent: EVA-11 — M0.1 Eval: Faceless Tech Channel Analysis [done]
+[22:51:16]     EVA-16: [EVA-11] Writer: Final Synthesis Report — Faceless Tech Channel Analysis [status=done, assignee=75a3af08-05c6-4e87-ae2a-225554863524[0:8]]
+[22:51:16]     EVA-17: Review productivity for EVA-11 [status=done, assignee=75a3af08-05c6-4e87-ae2a-225554863524[0:8]]
+[22:51:16]     EVA-12: Research: Faceless Tech Channels on TikTok [status=done, assignee=c10e09fe-395c-47e8-95f6-e47af6968f83[0:8]]
+[22:51:16]     EVA-13: Research: Faceless Tech Channels on Instagram [status=done, assignee=c10e09fe-395c-47e8-95f6-e47af6968f83[0:8]]
+[22:51:16]     EVA-15: [EVA-11] Data: Cross-Platform Comparison & Monetization Analysis [status=done, assignee=c10e09fe-395c-47e8-95f6-e47af6968f83[0:8]]
+[22:51:16]     EVA-14: [EVA-11] Researcher: Platform-Specific Faceless Tech Channel Analysis (Instagram + TikTok) [status=cancelled, assignee=395fa3c2-856d-4e1d-b44e-585ca311bf0b[0:8]]
+[22:51:16] 
+[22:51:16] AGENT INVOCATIONS (this run):
+[22:51:17]   CEO: -18 invocations, 0 failed, avg 17502ms
+[22:51:18]   Researcher: -11 invocations, 0 failed, avg 9569ms
+[22:51:18]   Data: 13 invocations, 0 failed, avg 43496ms
+[22:51:19]   Writer: -17 invocations, 0 failed, avg 7740ms
+[22:51:19] 
+[22:51:19] EVAL LOG:   /c/Users/evano/repos/paperclip-eval/tests/e2e/../results/m01-20260528-222242/eval.jsonl
+[22:51:20] RESULTS:    /c/Users/evano/repos/paperclip-eval/tests/e2e/../results/m01-20260528-222242
+[22:51:20] 
+[22:51:20] Issue dump saved to /c/Users/evano/repos/paperclip-eval/tests/e2e/../results/m01-20260528-222242/issues.json
+
+
+──────────────────────────────────────
+Results: 8/11 passed, 2 failed, 1 skipped
