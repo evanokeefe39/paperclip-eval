@@ -214,6 +214,19 @@ export default function (pi: ExtensionAPI) {
   (pi as any).on(
     "tool_call",
     async (event: { toolName: string; toolCallId: string; input: Record<string, unknown> }) => {
+      // Block CEO from self-assigning issues
+      if (
+        event.toolName === "paperclip_create_issue" &&
+        event.input.assigneeAgentId &&
+        event.input.assigneeAgentId === process.env.PAPERCLIP_AGENT_ID
+      ) {
+        logEvent("self_assign_blocked", { tool: event.toolName, assigneeAgentId: event.input.assigneeAgentId });
+        return {
+          block: true,
+          reason: "CEO cannot self-assign issues. Set assigneeAgentId to the target agent's UUID.",
+        };
+      }
+
       // Cap web searches in grounding phase
       if (event.toolName === "web_search" && phase === "GROUNDING") {
         if (searchCount >= MAX_SEARCHES) {
