@@ -44,11 +44,6 @@
     "query_findings": "allow",
     "get_finding": "allow",
 
-    // Logging
-    "log_event": "allow",
-    "get_log": "allow",
-    "get_trace_id": "allow",
-
     // Escalation
     "escalate": "allow",
 
