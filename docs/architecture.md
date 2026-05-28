@@ -44,7 +44,7 @@
 
 - Image: Custom, built from shared `Dockerfile` (node:22-slim + Pi CLI)
 - Role: HTTP-to-RPC translation layer between Paperclip and Pi
-- Stateless per-request: each invocation spawns a fresh Pi process
+- Persistent Pi process with FIFO request queue: one Pi process per container, reused across invocations
 - Each container runs `bridge.mjs` as its entrypoint
 - Pi extensions loaded natively by Pi from `/root/.pi/agent/extensions/`: web-search, web-fetch, escalate (v2, local/discord backend), web-scrape, paperclip, artifacts, logging
 - Paperclip behavioral skills loaded via Pi's native `--skill` flag: paperclip (heartbeat protocol), paperclip-converting-plans-to-tasks, para-memory-files
@@ -65,6 +65,7 @@
 - Installed globally in agent containers via `@earendil-works/pi-coding-agent`
 - Runs in RPC mode (`--mode rpc --no-session`)
 - Communicates via JSONL over stdin/stdout
+- Persistent process: spawned once at bridge startup, supports multiple prompt cycles via `new_session` command
 - Provider and model configured per-container via environment variables
 
 ## Docker Networking
@@ -83,28 +84,30 @@ Paperclip registers agent adapter URLs using internal addresses (`http://ceo:808
 
 `docker-compose.yml` manages all three containers. Agent containers depend on Paperclip (`service_started` condition). All containers have `restart: unless-stopped`.
 
-Agent containers are stateless: each HTTP request to `/invoke` spawns a new Pi process that lives for the duration of that request. No persistent connections, no session state. Workspace volumes exist for Pi to read/write files during execution but are not critical state.
+Agent containers run a persistent Pi process that stays alive across requests. The bridge spawns Pi once at startup and serializes requests through an in-memory FIFO queue. Between requests, a `new_session` command resets the conversation context while keeping extensions and provider connections loaded. If Pi crashes, the bridge respawns it with exponential backoff. Workspace volumes exist for Pi to read/write files during execution but are not critical state.
 
 Resource limits: agent containers are capped at 512MB memory.
 
 ## Data Flow
 
 ```
-Paperclip                    Bridge Container               Pi Process
+Paperclip                    Bridge Container               Pi Process (persistent)
+   |                              |                            |
+   |                              |--- spawn pi (at startup) ->|
+   |                              |<-- extension_ui_request ---|  (extensions load once)
+   |                              |<-- ready ------------------|
    |                              |                            |
    |--- POST /invoke ----------->|                            |
-   |    {prompt, systemPrompt}   |                            |
-   |                              |--- spawn pi (RPC mode) -->|
-   |                              |--- write prompt to stdin ->|
+   |    {agentId, runId, context}|--- enqueue, then prompt --->|
    |                              |                            |
-   |                              |<-- extension_ui_request ---|  (optional)
    |                              |<-- agent_start ------------|
    |                              |<-- message_update(s) ------|
    |                              |<-- agent_end --------------|
    |                              |                            |
-   |                              |--- stdin.end() ----------->|
-   |                              |                         (exit)
-   |<-- 200 {output, events} ----|                            |
+   |                              |--- new_session ----------->|
+   |                              |<-- new_session_ack --------|
+   |                              |                            |
+   |<-- 200 {output, events} ----|          (Pi stays alive)   |
 ```
 
 ## Agent Configuration
