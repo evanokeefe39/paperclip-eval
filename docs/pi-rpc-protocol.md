@@ -2,7 +2,7 @@
 
 ## Overview
 
-Pi runs as a subprocess in RPC mode, communicating via JSONL (newline-delimited JSON) over stdin/stdout. Each invocation is a single prompt-response cycle with no session persistence.
+Pi runs as a subprocess in RPC mode, communicating via JSONL (newline-delimited JSON) over stdin/stdout. In persistent mode (bridge v2.0.0), a single Pi process handles multiple prompt-response cycles. Between cycles, the bridge sends a `new_session` command that resets the conversation context while keeping the process and loaded extensions alive.
 
 ## Spawn Arguments
 
@@ -24,7 +24,7 @@ Write a single JSON object followed by a newline to stdin:
 {"type": "prompt", "message": "Your task description here"}
 ```
 
-The prompt is written immediately after spawn. Only one prompt per process lifecycle.
+In spawn-per-request mode (bridge v1.x), the prompt is written immediately after spawn and only one prompt is sent per process lifecycle. In persistent mode (bridge v2.0.0), multiple prompts are sent to the same process, separated by `new_session` commands that reset the conversation context.
 
 ## Output Events
 
@@ -72,38 +72,80 @@ Prompt was rejected by Pi (e.g., invalid configuration, provider error before ge
 {"type": "response", "success": false, ...}
 ```
 
+## Persistent Mode (v2.0.0)
+
+In persistent mode, the bridge spawns Pi once at startup and reuses it for all requests. This eliminates per-request spawn overhead (extension loading, provider auth, etc.).
+
+### Supported Commands
+
+| Command | Direction | Purpose |
+|---------|-----------|---------|
+| `prompt` | bridge → Pi | Send a task prompt. Triggers agent_start → message_update(s) → agent_end cycle. |
+| `new_session` | bridge → Pi | Reset conversation context. Extensions and provider connections remain loaded. |
+| `follow_up` | bridge → Pi | Send a follow-up message within the current session (not currently used by bridge). |
+| `steer` | bridge → Pi | Inject a system-level steering message mid-turn (not currently used by bridge). |
+| `abort` | bridge → Pi | Cancel the current generation (not currently used by bridge). |
+| `get_state` | bridge → Pi | Query Pi's current state (not currently used by bridge). |
+
+### new_session Command
+
+```json
+{"type": "new_session"}
+```
+
+Pi acknowledges with a `new_session_ack` event on stdout. After acknowledgement, the next `prompt` command starts with a clean conversation context. Extensions remain loaded and provider connections stay open.
+
 ## Lifecycle Diagrams
 
-### With Extensions
+### Persistent Mode (v2.0.0)
 
 ```
 spawn pi process
      |
      v
-extension_ui_request   (one or more, as extensions initialize)
+extension_ui_request(s)   (extensions initialize once)
      |
      v
-agent_start            (prompt accepted, generation begins)
+ready                     (Pi accepts commands)
      |
-     v
-message_update         (repeated, one per streaming token batch)
-message_update
-message_update
-     |
-     v
-agent_end              (generation complete)
-     |
-     v
-stdin.end()            (bridge closes stdin)
+     +<--------------------------------------------------+
+     |                                                    |
+     v                                                    |
+prompt                    (bridge writes prompt to stdin)  |
+     |                                                    |
+     v                                                    |
+agent_start               (generation begins)             |
+     |                                                    |
+     v                                                    |
+message_update(s)         (streaming tokens)              |
+     |                                                    |
+     v                                                    |
+agent_end                 (generation complete)            |
+     |                                                    |
+     v                                                    |
+new_session               (bridge resets context)          |
+     |                                                    |
+     v                                                    |
+new_session_ack           (Pi confirms reset)             |
+     |                                                    |
+     +----------------------------------------------------+
+                          (loop for next request)
+
+     ...eventually...
+
+stdin.end()               (bridge shutting down)
      |
      v
 process exit
 ```
 
-### Without Extensions
+### Spawn-per-request Mode (v1.x, deprecated)
 
 ```
 spawn pi process
+     |
+     v
+extension_ui_request(s)   (optional, as extensions initialize)
      |
      v
 agent_start
