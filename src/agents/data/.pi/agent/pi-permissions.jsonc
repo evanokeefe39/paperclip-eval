@@ -52,11 +52,6 @@
     "query_data_products": "allow",
     "get_data_product": "allow",
 
-    // Logging
-    "log_event": "allow",
-    "get_log": "allow",
-    "get_trace_id": "allow",
-
     // Escalation
     "escalate": "allow",
 

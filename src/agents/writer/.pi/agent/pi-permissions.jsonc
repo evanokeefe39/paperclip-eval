@@ -45,11 +45,6 @@
     "duckdb_query": "allow",
     "duckdb_import": "allow",
 
-    // Logging
-    "log_event": "allow",
-    "get_log": "allow",
-    "get_trace_id": "allow",
-
     // Escalation
     "escalate": "allow",
 

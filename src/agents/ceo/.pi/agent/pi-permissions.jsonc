@@ -34,11 +34,6 @@
     "read_artifact": "allow",
     "list_artifacts": "allow",
 
-    // Logging / observability
-    "log_event": "allow",
-    "get_log": "allow",
-    "get_trace_id": "allow",
-
     // Paperclip coordination — read/list operations
     "paperclip_me": "allow",
     "paperclip_inbox": "allow",
