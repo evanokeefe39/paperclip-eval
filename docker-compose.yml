@@ -84,7 +84,8 @@ services:
       S3_ENDPOINT: "http://minio:9000"
       S3_ACCESS_KEY: "${MINIO_ROOT_USER:-minioadmin}"
       S3_SECRET_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin}"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://dashboard:18890"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://openobserve:5080/api/default"
+      OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Basic ${ZO_OTLP_AUTH}"
     volumes:
       - ./src/agents/rbac.json:/app/rbac.json:ro
     depends_on:
@@ -103,18 +104,21 @@ services:
         limits:
           memory: 128M
 
-  dashboard:
-    image: mcr.microsoft.com/dotnet/aspire-dashboard:9.0
+  openobserve:
+    image: public.ecr.aws/zinclabs/openobserve:latest
+    restart: unless-stopped
     ports:
-      - "18888:18888"
-      - "18889:18889"
+      - "5080:5080"
     environment:
-      DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS: "true"
-      DASHBOARD__OTLP__HTTPENDPOINT: "http://0.0.0.0:18890"
+      ZO_ROOT_USER_EMAIL: "${ZO_ROOT_USER_EMAIL:-admin@example.com}"
+      ZO_ROOT_USER_PASSWORD: "${ZO_ROOT_USER_PASSWORD:-paperclip-eval}"
+      ZO_DATA_DIR: "/data"
+    volumes:
+      - openobserve-data:/data
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 512M
 
   paperclip:
     image: ghcr.io/paperclipai/paperclip:latest
@@ -155,7 +159,8 @@ services:
     environment:
       BRIDGE_TIMEOUT_MS: "300000"
       ARTIFACT_SERVICE_URL: "http://artifact-service:8090"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://dashboard:18890"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://openobserve:5080/api/default"
+      OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Basic ${ZO_OTLP_AUTH}"
     volumes:
       - ceo-workspace:/workspace
     depends_on:
@@ -178,7 +183,8 @@ services:
       NVIDIA_NIM_API_KEY: "${NVIDIA_NIM_API_KEY}"
       FINDING_STYLE: "intelligence"
       ARTIFACT_SERVICE_URL: "http://artifact-service:8090"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://dashboard:18890"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://openobserve:5080/api/default"
+      OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Basic ${ZO_OTLP_AUTH}"
     volumes:
       - researcher-workspace:/workspace
     depends_on:
@@ -202,7 +208,8 @@ services:
       NVIDIA_NIM_API_KEY: "${NVIDIA_NIM_API_KEY}"
       FINDING_STYLE: "data"
       ARTIFACT_SERVICE_URL: "http://artifact-service:8090"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://dashboard:18890"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://openobserve:5080/api/default"
+      OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Basic ${ZO_OTLP_AUTH}"
     deploy:
       resources:
         limits:
@@ -227,7 +234,8 @@ services:
       - src/agents/writer/.env
     environment:
       ARTIFACT_SERVICE_URL: "http://artifact-service:8090"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://dashboard:18890"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://openobserve:5080/api/default"
+      OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Basic ${ZO_OTLP_AUTH}"
     deploy:
       resources:
         limits:
@@ -255,3 +263,4 @@ volumes:
     name: paperclip-eval-data-workspace
   writer-workspace:
     name: paperclip-eval-writer-workspace
+  openobserve-data:
