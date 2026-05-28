@@ -18,10 +18,10 @@
   },
   "otel": {
     "enabled": true,
-    "endpoint": "http://dashboard:18889",
-    "protocol": "grpc",
+    "endpoint": "http://openobserve:5080/api/default",
+    "protocol": "http",
     "serviceName": "ceo-agent",
     "captureContent": "metadata_only",
-    "signals": { "traces": true, "metrics": false, "logs": true }
+    "signals": { "traces": true, "metrics": true, "logs": true }
   }
 }
