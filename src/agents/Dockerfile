@@ -6,7 +6,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 ENV NODE_PATH=/usr/local/lib/node_modules
 WORKDIR /app
-COPY bridge.mjs .
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev
+COPY bridge.mjs logger.mjs ./
 COPY extensions/ /root/.pi/agent/extensions/
 COPY skills/paperclip-skills/ /app/skills/paperclip-skills/
 RUN pi extensions install || true

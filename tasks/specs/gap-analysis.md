@@ -102,8 +102,8 @@ Generated 2026-05-26. Covers all agents, extensions, and supporting infrastructu
 | bridge-design.md | Accurate | Protocol description matches bridge.mjs |
 | paperclip-integration.md | Accurate | Auth, registration flow correct |
 | pi-rpc-protocol.md | Accurate | JSONL protocol matches implementation |
-| toyota-way-principles-integration.md | Aspirational | Describes future phases, not current state |
-| toyota-way-principles-reference.md | Reference material | Not project-specific, always accurate |
+| toyota-way/principles-integration.md | Aspirational | Describes future phases, not current state |
+| toyota-way/principles-reference.md | Reference material | Not project-specific, always accurate |
 
 ### Missing docs
 

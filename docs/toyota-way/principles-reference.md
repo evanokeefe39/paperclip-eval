@@ -1,3 +1,5 @@
+[Docs](../index.md) > [Toyota Way](./) > Principles Reference
+
 # The Toyota Way in Paperclip
 
 A reference map tying each Toyota Production System principle to its concrete implementation in a Paperclip content pipeline.

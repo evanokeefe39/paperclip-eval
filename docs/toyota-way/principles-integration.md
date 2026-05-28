@@ -1,3 +1,5 @@
+[Docs](../index.md) > [Toyota Way](./) > TPS Content Pipeline Architecture
+
 # TPS Content Pipeline Architecture
 
 An autonomous content research and publishing pipeline built on Paperclip, Pi agents, and Toyota Production System principles.

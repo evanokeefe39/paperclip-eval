@@ -31,7 +31,7 @@ Deliver agent escalations to humans outside the Paperclip UI, starting with Disc
 - `src/agents/bridge.mjs` — HTTP-to-RPC bridge. Spawns Pi with `-e` flags for extensions. Extension load order defined here.
 - `src/agents/docker-compose.yml` — full stack. Adapter container goes here.
 - `src/agents/.env.example` — template for env vars.
-- `docs/toyota-way-principles-integration.md` (lines 132-157) — TPS design specifying escalation types, Discord routing, and Paperclip wake context env vars.
+- `docs/toyota-way/principles-integration.md` (escalate tool section) — TPS design specifying escalation types, Discord routing, and Paperclip wake context env vars.
 - `tasks/specs/escalate.md` (line 4) — "Existing Paperclip plugins (Discord, Telegram, Slack) notify the human." The tool was designed to be notification-agnostic from day one.
 - `tasks/specs/escalate.md` (line 128) — "Chat adapter enhancements that render structured inputs as Discord buttons / Telegram keyboards." Already framed as adapters in the original spec.
 

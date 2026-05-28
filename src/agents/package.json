@@ -1,0 +1,8 @@
+{
+  "name": "paperclip-bridge",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "pino": "^9.6.0"
+  }
+}

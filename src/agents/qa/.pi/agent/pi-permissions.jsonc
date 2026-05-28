@@ -44,10 +44,12 @@
     "duckdb_query": "allow",
     "duckdb_import": "allow",
 
-    // Findings
-    "record_finding": "allow",
-    "list_findings": "allow",
-    "export_findings": "allow",
+    // Workproduct — qa kinds (artifact_review, plan_review, stage_gate)
+    "record_artifact_review": "allow",
+    "record_plan_review": "allow",
+    "record_stage_gate": "allow",
+    "query_assessments": "allow",
+    "get_assessment": "allow",
 
     // Paperclip — executor subset
     "paperclip_me": "allow",

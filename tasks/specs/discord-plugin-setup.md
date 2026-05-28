@@ -33,7 +33,7 @@ Investigation on 2026-05-26 found:
 
 - `tasks/specs/discord-bridge.md` — superseded, stale header added
 - `tasks/specs/escalate.md` — partially superseded, stale header added
-- `docs/toyota-way-principles-integration.md` — escalate tool section updated
+- `docs/toyota-way/principles-integration.md` — escalate tool section updated
 
 ## Escalation Primitives: What Exists vs. What We Need
 

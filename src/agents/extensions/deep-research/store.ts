@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import * as client from "../artifact-client.js";
+import * as client from "../lib/artifact-client.js";
 import type { Finding, SessionMeta, SubQuery, EngineState } from "./types.js";
 import type { Config } from "./config.js";
 

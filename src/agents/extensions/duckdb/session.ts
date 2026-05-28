@@ -1,5 +1,5 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
-import * as client from "../artifact-client.js";
+import * as client from "../lib/artifact-client.js";
 
 const AGENT_NAME = process.env.AGENT_NAME || "unknown";
 

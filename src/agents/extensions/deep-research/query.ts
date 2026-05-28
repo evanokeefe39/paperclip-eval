@@ -1,4 +1,4 @@
-import * as client from "../artifact-client.js";
+import * as client from "../lib/artifact-client.js";
 import type { IndexEntry, Finding } from "./types.js";
 import type { Config } from "./config.js";
 

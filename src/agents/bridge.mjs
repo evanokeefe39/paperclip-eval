@@ -1,6 +1,7 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createLogger } from "./logger.mjs";
 
 
 // --- Configuration ---
@@ -15,15 +16,14 @@ const PAPERCLIP_API_KEY = process.env.PAPERCLIP_API_KEY || "";
 const PAPERCLIP_AGENT_ID = process.env.PAPERCLIP_AGENT_ID || "";
 const PAPERCLIP_COMPANY_ID = process.env.PAPERCLIP_COMPANY_ID || "";
 
-// --- 1.1 Hand-rolled JSON logger ---
+// --- Pino logger ---
 
-const LOG_LEVEL = process.env.LOG_LEVEL || "info";
-const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
+const AGENT_NAME = process.env.AGENT_NAME || "";
+const SERVICE_NAME = AGENT_NAME ? `${AGENT_NAME}-bridge` : "bridge";
+const logger = createLogger({ service: SERVICE_NAME });
 
 function log(level, event, data = {}) {
-  if (LEVELS[level] < LEVELS[LOG_LEVEL]) return;
-  const entry = { ts: new Date().toISOString(), level, event, pid: process.pid, ...data };
-  process.stdout.write(JSON.stringify(entry) + "\n");
+  logger[level]({ event, ...data }, event);
 }
 
 // --- Cost reporting to Paperclip ---

@@ -32,10 +32,14 @@
     "list_artifacts": "allow",
     "get_template": "allow",
 
-    // Findings (consume research findings)
-    "record_finding": "allow",
-    "list_findings": "allow",
-    "export_findings": "allow",
+    // Workproduct — writer kinds (report, guide, article, marketing_copy, newsletter)
+    "record_report": "allow",
+    "record_guide": "allow",
+    "record_article": "allow",
+    "record_marketing_copy": "allow",
+    "record_newsletter": "allow",
+    "query_content": "allow",
+    "get_content": "allow",
 
     // DuckDB (query data for reports)
     "duckdb_query": "allow",

@@ -232,7 +232,7 @@ Implement TPS principles across the pipeline. Phased — each phase solves probl
 
 Version-control the shared artifacts volume so learnings, outputs, QA verdicts, and publish receipts have full audit history. Board operator can clone, diff, and `git log --author=researcher` to review any agent's work over time.
 
-### Design (from agent-operating-standard.md, deferred)
+### Design (from [agent-standard](docs/agent-standard/shared-resources.md), deferred)
 
 Two options explored:
 
@@ -252,7 +252,7 @@ Sync runs as a post-invocation hook in bridge.mjs or a sidecar container. Commit
 
 Centralization mechanism that reads raw `learnings.md` from every agent, detects patterns, maintains per-agent profiles and digests at `/artifacts/meta/agent/{name}/`, archives old entries, and generates kaizen reports.
 
-### Design (from agent-operating-standard.md, deferred)
+### Design (from [agent-standard](docs/agent-standard/shared-resources.md), deferred)
 
 - Runs as a sidecar container (`src/agents/drain/`) on a weekly schedule
 - Reads `learnings.md` + `learnings-live.jsonl` per agent
@@ -555,6 +555,14 @@ Core 4 everywhere. Everything else role-specific. Coder handled separately (bash
 
 - Not critical — current layout works, just messy
 - Should batch with Docker image size optimization (shared concern with Dockerfile changes)
+
+---
+
+## Done: Docs Restructure
+
+Split `agent-operating-standard.md` (1260 LOC) into 7 focused pages under `docs/agent-standard/`. Grouped Toyota docs into `docs/toyota-way/`. Added `docs/index.md` hub page.
+
+Plan: `tasks/plans/docs-restructure.md`
 
 ---
 

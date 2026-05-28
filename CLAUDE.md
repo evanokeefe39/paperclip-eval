@@ -124,7 +124,9 @@ tests/                       Hurl, k6, and fixture-based test suite
   fixtures/                  Test payloads
   results/                   Timestamped test run reports
 .claude/skills/paperclip-api.md  API reference skill
-docs/                        Architecture, design, and integration docs
+docs/                        Architecture, design, and integration docs (index.md hub)
+  agent-standard/            Agent operating standard (split from monolith into 7 pages)
+  toyota-way/                TPS principles integration and reference
 LEARNING.md                  Running log of issues and workarounds
 ROADMAP.md                   Planned improvements (MinIO, etc) — eval stage
 tasks/                       Plans, todos, lessons

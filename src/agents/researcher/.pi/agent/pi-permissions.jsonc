@@ -38,10 +38,11 @@
     "list_artifacts": "allow",
     "get_template": "allow",
 
-    // Findings
+    // Workproduct — findings (researcher's per-agent kinds)
     "record_finding": "allow",
-    "list_findings": "allow",
-    "export_findings": "allow",
+    "add_source": "allow",
+    "query_findings": "allow",
+    "get_finding": "allow",
 
     // Logging
     "log_event": "allow",

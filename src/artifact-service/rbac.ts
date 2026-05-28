@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
+import { log } from "./logger";
 
 interface AgentRules {
   read: string[];
@@ -21,11 +22,11 @@ export function loadRules(): void {
     if (existsSync(p)) {
       const raw = readFileSync(p, "utf-8");
       rules = JSON.parse(raw) as RbacConfig;
-      console.log(`rbac: loaded rules from ${p}`);
+      log.info({ event: "rbac_loaded", path: p }, "rbac_loaded");
       return;
     }
   }
-  console.warn("rbac: no rbac.json found — all access denied by default");
+  log.warn({ event: "rbac_missing" }, "no rbac.json found — all access denied by default");
 }
 
 /** Check whether agentName may read the given s3Key. */

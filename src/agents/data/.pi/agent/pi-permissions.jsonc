@@ -44,10 +44,13 @@
     "list_artifacts": "allow",
     "get_template": "allow",
 
-    // Findings
-    "record_finding": "allow",
-    "list_findings": "allow",
-    "export_findings": "allow",
+    // Workproduct — data kinds (dataset_ref, query_result, metric, chart)
+    "record_dataset_ref": "allow",
+    "record_query_result": "allow",
+    "record_metric": "allow",
+    "record_chart": "allow",
+    "query_data_products": "allow",
+    "get_data_product": "allow",
 
     // Logging
     "log_event": "allow",

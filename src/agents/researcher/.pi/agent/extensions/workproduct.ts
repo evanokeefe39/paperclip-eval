@@ -1,54 +1,21 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
-import * as client from "../artifact-client.js";
-import { validateByStyle, type StyleProfiles } from "./validate.js";
+import * as client from "./artifact-client.js";
+import { validateByStyle, type StyleProfiles } from "./workproduct-lib/validate.js";
+import {
+  SourceReliability,
+  InformationCredibility,
+  SourceType,
+  CollectionMethod,
+  Corroboration,
+  SourceSchema,
+} from "./workproduct-lib/schemas.js";
 
 // ---------------------------------------------------------------------------
-// TypeBox schemas (source of truth — matches findings-schema.md spec)
+// Researcher-specific style enum (not in shared schemas — researcher uses
+// the full citation/grading taxonomy; other agents may use different sets).
 // ---------------------------------------------------------------------------
-
-const SourceReliability = Type.Union([
-  Type.Literal("A"), Type.Literal("B"), Type.Literal("C"),
-  Type.Literal("D"), Type.Literal("E"), Type.Literal("F"),
-], { description: "NATO ADMIRALTY source reliability: A=completely reliable, B=usually reliable, C=fairly reliable, D=not usually reliable, E=unreliable, F=cannot be judged" });
-
-const InformationCredibility = Type.Union([
-  Type.Literal(1), Type.Literal(2), Type.Literal(3),
-  Type.Literal(4), Type.Literal(5), Type.Literal(6),
-], { description: "NATO ADMIRALTY information credibility: 1=confirmed, 2=probably true, 3=possibly true, 4=doubtful, 5=improbable, 6=cannot be judged" });
-
-const SourceType = Type.Union([
-  Type.Literal("primary_official"),
-  Type.Literal("structured_aggregator"),
-  Type.Literal("news_editorial"),
-  Type.Literal("press_release"),
-  Type.Literal("academic_paper"),
-  Type.Literal("industry_report"),
-  Type.Literal("social_media"),
-  Type.Literal("community_forum"),
-  Type.Literal("blog_personal"),
-  Type.Literal("api_data"),
-  Type.Literal("dataset"),
-  Type.Literal("other"),
-], { description: "Structural classification of the source" });
-
-const CollectionMethod = Type.Union([
-  Type.Literal("web_search"),
-  Type.Literal("api_query"),
-  Type.Literal("web_scrape"),
-  Type.Literal("deep_research"),
-  Type.Literal("direct_reference"),
-  Type.Literal("human_provided"),
-  Type.Literal("database_query"),
-], { description: "How this source was obtained" });
-
-const Corroboration = Type.Union([
-  Type.Literal("confirmed"),
-  Type.Literal("probable"),
-  Type.Literal("uncorroborated"),
-  Type.Literal("conflicting"),
-], { description: "Corroboration status across sources. Auto-inferred from source count if omitted." });
 
 const FindingStyle = Type.Union([
   Type.Literal("intelligence"),
@@ -57,21 +24,6 @@ const FindingStyle = Type.Union([
   Type.Literal("data"),
   Type.Literal("general"),
 ], { description: "Citation/grading standard to apply. Determines which fields are required." });
-
-const SourceSchema = Type.Object({
-  source_name: Type.String({ description: "Human name: 'Crunchbase', 'TechCrunch', 'SEC EDGAR'" }),
-  source_url: Type.String({ description: "URL of specific page or document" }),
-  source_type: SourceType,
-  source_reliability: Type.Optional(SourceReliability),
-  information_credibility: Type.Optional(InformationCredibility),
-  authors: Type.Optional(Type.Array(Type.String(), { description: "Named authors if known" })),
-  publisher: Type.Optional(Type.String({ description: "Publishing organization" })),
-  date_published: Type.Optional(Type.String({ description: "When source material was published (ISO 8601)" })),
-  date_accessed: Type.Optional(Type.String({ description: "When retrieved — auto-set to now if omitted" })),
-  collection_method: Type.Optional(CollectionMethod),
-  doi: Type.Optional(Type.String({ description: "Digital Object Identifier if available" })),
-  verbatim_quote: Type.Optional(Type.String({ description: "Exact quote from this specific source" })),
-});
 
 type SourceInput = Static<typeof SourceSchema>;
 
@@ -213,10 +165,17 @@ function recordToFinding(rec: client.ArtifactRecord, content: string): StoredFin
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
-  if (!client.getAgentName()) return;
+  const agentName = client.getAgentName();
+  if (agentName !== "researcher") {
+    if (agentName) {
+      console.warn(
+        `[workproduct] Skipping researcher workproduct extension — AGENT_NAME is "${agentName}", expected "researcher".`,
+      );
+    }
+    return;
+  }
 
   const snippet = getPromptSnippet();
-  const agentName = client.getAgentName();
 
   // ---- record_finding ----
   pi.registerTool({

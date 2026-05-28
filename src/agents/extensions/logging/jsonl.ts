@@ -1,4 +1,4 @@
-import * as client from "../artifact-client.js";
+import * as client from "../lib/artifact-client.js";
 
 export class JsonlWriter {
   private agentName: string;
