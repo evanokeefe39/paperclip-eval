@@ -59,7 +59,7 @@ fi
 # TEST 3: Health shows idle state (busy=false, queue_depth=0)
 # ─────────────────────────────────────────────────────────────────────
 begin_test "Health shows idle state before contention"
-BUSY=$(echo "$HEALTH" | jq -r '.busy // empty')
+BUSY=$(echo "$HEALTH" | jq -r '.busy | tostring')
 QDEPTH=$(echo "$HEALTH" | jq -r '.queue_depth // empty')
 if assert_eq "$BUSY" "false" "busy" && assert_eq "$QDEPTH" "0" "queue_depth"; then
     pass
@@ -151,7 +151,7 @@ sleep 2
 
 begin_test "Health shows busy=true and queue_depth>=1 during contention"
 HEALTH_MID=$(curl -sf "$BRIDGE_URL/health" 2>/dev/null || echo '{}')
-MID_BUSY=$(echo "$HEALTH_MID" | jq -r '.busy // empty')
+MID_BUSY=$(echo "$HEALTH_MID" | jq -r '.busy | tostring')
 MID_QDEPTH=$(echo "$HEALTH_MID" | jq -r '.queue_depth // empty')
 
 if [ "$MID_BUSY" = "true" ] && [ "${MID_QDEPTH:-0}" -ge 1 ]; then
@@ -217,7 +217,7 @@ fi
 # ─────────────────────────────────────────────────────────────────────
 begin_test "Health shows busy=false and queue_depth=0 after completion"
 HEALTH_POST=$(curl -sf "$BRIDGE_URL/health")
-POST_BUSY=$(echo "$HEALTH_POST" | jq -r '.busy // empty')
+POST_BUSY=$(echo "$HEALTH_POST" | jq -r '.busy | tostring')
 POST_QDEPTH=$(echo "$HEALTH_POST" | jq -r '.queue_depth // empty')
 if assert_eq "$POST_BUSY" "false" "busy" && assert_eq "$POST_QDEPTH" "0" "queue_depth"; then
     pass

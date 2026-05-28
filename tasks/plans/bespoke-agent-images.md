@@ -1180,7 +1180,7 @@ THEN no chromium/firefox processes remain running
 - [ ] Image build tests (B.1-B.7) pass
 - [ ] CLAUDE.md updated with bespoke image pattern
 - [ ] All tests invokable with single command
-- [ ] tasks/todo.md updated
+- [ ] Named plan in tasks/plans/ updated
 
 ## Open Questions
 

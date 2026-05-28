@@ -373,7 +373,7 @@ All writer kinds share a common shape: content body in artifact content, metadat
 - [ ] Smoke test confirms each agent container loads its workproduct extension at startup (check logs for tool registration)
 - [ ] Reasoning trace written
 - [ ] Assumption log written
-- [ ] `tasks/todo.md` plan items checked off
+- [ ] Named plan in tasks/plans/ updated and items checked off
 
 ## Negative Space
 

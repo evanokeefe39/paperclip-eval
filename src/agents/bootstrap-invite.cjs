@@ -5,6 +5,7 @@ catch { pgPath = require("child_process").execSync("find /app/node_modules/.pnpm
 const { Client } = require(pgPath);
 
 const connStr = process.env.PG_CONNECTION_STRING
+  || process.env.DATABASE_URL
   || "postgres://paperclip:paperclip@127.0.0.1:54329/paperclip";
 
 const c = new Client({ connectionString: connStr });

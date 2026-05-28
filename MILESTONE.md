@@ -362,3 +362,33 @@ Deep-dive analysis per sub-niche:
 ### Status
 
 Not started. Depends on M1 (artifact store v2) and M0.1 (subsystems wired). Researcher needs web scraping capabilities (T2–T3) and YouTube Data API tooling for Phase 1/2 scale.
+
+---
+
+## M0.5: Ad Hoc Scraping — Design Aesthetics from Instagram
+
+### What
+
+Extract a structured taxonomy of every design aesthetic, style, and visual movement referenced by [@vinny_creative](https://www.instagram.com/vinny_creative/) on Instagram. Deliver structured output (JSON or CSV), not prose.
+
+### Why
+
+- **Autonomy test** — can the agent handle a real ad hoc scraping task end-to-end without hand-holding? Instagram is adversarial to automation. The agent should figure out the approach, escalate if it hits walls, and deliver structured results.
+- **Content value** — vinny_creative covers a wide range of design aesthetics and visual culture. The extracted taxonomy is directly useful for the design system playground and future content work.
+
+### Goal
+
+Scrape the profile. Extract every design aesthetic or movement name. Deliver structured data with traceability back to source posts. The agent decides how.
+
+Known content from a thumbnail scan (not exhaustive — the feed goes deeper): Junk, New Genericana, Witchcraft, album cover art analysis, classic advertising design, typography breakdowns, tool comparisons, designer culture content.
+
+### Success criteria
+
+- [ ] Structured output with at least 20 distinct design aesthetics/movements
+- [ ] Each aesthetic traceable to source post(s)
+- [ ] Agent completes in a single ad hoc session — no Paperclip orchestration
+- [ ] Agent escalates appropriately if blocked (auth walls, rate limits, content locked in video)
+
+### Status
+
+Not started.

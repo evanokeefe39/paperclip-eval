@@ -408,7 +408,7 @@ res.end(JSON.stringify({
 - [ ] Cost reporting failure does not block /invoke response
 - [ ] Token usage visible in Paperclip cost dashboard
 - [ ] .env.example updated with new env vars
-- [ ] tasks/todo.md updated
+- [ ] Named plan in tasks/plans/ updated
 
 ## Negative Space
 

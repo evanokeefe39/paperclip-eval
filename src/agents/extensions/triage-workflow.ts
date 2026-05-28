@@ -214,17 +214,16 @@ export default function (pi: ExtensionAPI) {
   (pi as any).on(
     "tool_call",
     async (event: { toolName: string; toolCallId: string; input: Record<string, unknown> }) => {
-      // Block CEO from self-assigning issues
-      if (
-        event.toolName === "paperclip_create_issue" &&
-        event.input.assigneeAgentId &&
-        event.input.assigneeAgentId === process.env.PAPERCLIP_AGENT_ID
-      ) {
-        logEvent("self_assign_blocked", { tool: event.toolName, assigneeAgentId: event.input.assigneeAgentId });
-        return {
-          block: true,
-          reason: "CEO cannot self-assign issues. Set assigneeAgentId to the target agent's UUID.",
-        };
+      // Block CEO from self-assigning issues (explicit or implicit via missing assignee)
+      if (event.toolName === "paperclip_create_issue") {
+        const assignee = event.input.assigneeAgentId;
+        if (!assignee || assignee === process.env.PAPERCLIP_AGENT_ID) {
+          logEvent("self_assign_blocked", { tool: event.toolName, assigneeAgentId: assignee ?? "missing" });
+          return {
+            block: true,
+            reason: "CEO cannot self-assign issues. assigneeAgentId is required and must be a subordinate agent's UUID, not the CEO's own ID.",
+          };
+        }
       }
 
       // Cap web searches in grounding phase
