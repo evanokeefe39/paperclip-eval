@@ -299,12 +299,29 @@ register_agent() {
   fi
 }
 
+compose_services() {
+  # Returns newline-separated list of service names defined in the compose file.
+  (cd "$REPO_ROOT" && docker compose -f "$COMPOSE_FILE" config --services 2>/dev/null)
+}
+
 discover_agents() {
   log cyan "Registering agents..."
   local independent=() dependent=()
 
+  # Only register agents that have a matching service in docker-compose.
+  # Agent dirs without a compose service would be registered in Paperclip but
+  # never reachable (no running container), causing DNS failures on dispatch.
+  local services
+  services="$(compose_services)"
+
   for dir in "${SCRIPT_DIR}"/*/; do
     [[ -f "${dir}.pi/agent/config.yml" && -f "${dir}agent.json" ]] || continue
+    local name
+    name="$(basename "$dir")"
+    if ! echo "$services" | grep -qx "$name"; then
+      log cyan "  Skipping $name (no compose service)"
+      continue
+    fi
     local reports_to
     reports_to="$(jq -r '.reportsTo // empty' "${dir}agent.json")"
     if [[ -z "$reports_to" ]]; then
