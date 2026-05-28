@@ -121,3 +121,69 @@ Patterns and corrections from implementation cycles. Review before starting work
 **What happened:** eBay T3 renders the page successfully (HTML returned, no challenge) but `.s-item` matches nothing. The selector worked previously but eBay changed their DOM. No automated detection caught this.
 
 **Implication:** Every selector in sites.json is a maintenance liability. Sites redesign their DOM regularly. Need a strategy for detecting stale selectors (periodic campaigns, or alert when a previously-PASS site returns EMPTY).
+
+---
+
+## 2026-05-28: Concurrent Pi spawns corrupt npm node_modules
+
+**What happened:** Paperclip dispatches multiple invocations to an agent simultaneously (heartbeat + issue_assigned). Each Pi spawn runs `npm install` for settings.json packages (pi-otel, pi-permission-system, etc.) in the same `/root/.pi/agent/npm/node_modules/` directory. Concurrent npm operations cause ENOTEMPTY errors and corrupted state that persists across retries.
+
+**Root cause:** Bridge spawns Pi on every `/invoke` request with no serialization. Two concurrent spawns = two concurrent npm installs = filesystem corruption.
+
+**Fix:** Two-layer: (1) Pre-install packages in Dockerfile so Pi finds them at startup without running npm install. (2) Invocation lock in bridge.mjs prevents concurrent Pi spawns entirely.
+
+**Rule:** Any package in an agent's `.pi/agent/settings.json` must also be pre-installed in the Dockerfile via `npm install --prefix /root/.pi/agent/npm`. Never rely on Pi's runtime package installation in containerized agents — it's not concurrency-safe.
+
+---
+
+## 2026-05-28: AGENT_NAME env var must be set in docker-compose
+
+**What happened:** Extensions that gate on agent identity (workproduct for researcher, triage-workflow for ceo) check `process.env.AGENT_NAME`. This was never set in docker-compose.yml, so all agents reported `AGENT_NAME="unknown"` and extensions skipped self-registration.
+
+**Rule:** Every agent service in docker-compose.yml must set `AGENT_NAME` environment variable matching the agent's directory name (ceo, researcher, data, writer).
+
+---
+
+## 2026-05-28: bootstrap-invite.cjs needs external Postgres URL
+
+**What happened:** After migrating Paperclip to external Postgres (artifact-store-v2), the bootstrap-invite.cjs still had the old embedded Postgres default URL (`127.0.0.1:54329`). Connection refused on every bootstrap attempt.
+
+**Rule:** When changing infrastructure (database, storage), update ALL scripts that connect directly — not just the main application config. The bootstrap-invite.cjs default should match the compose DATABASE_URL, or use `process.env.DATABASE_URL` as fallback.
+
+---
+
+## 2026-05-28: Paperclip invite acceptance requires Origin header
+
+**What happened:** `POST /api/invites/{token}/accept` returns "Board mutation requires trusted browser origin" without an `Origin` header matching `BETTER_AUTH_TRUSTED_ORIGINS`.
+
+**Rule:** All Paperclip API mutations via curl need `-H "Origin: http://localhost:3100"` (or whatever PAPERCLIP_URL is). The api_post helper in setup.sh already does this, but manual curl commands must include it too.
+
+---
+
+## 2026-05-28: Pi process hangs during long tool-use chains (MiniMax)
+
+**What happened:** During M0.1 testing, 5 timeout errors occurred across CEO (3), Researcher (1), and Writer (1). Pattern: Pi process starts successfully (pi_ready fires with extensions_active=true), then hangs during execution. Bridge timeout (300s for CEO, 120s for others) catches it. No stderr output — Pi didn't crash, it got stuck mid-inference.
+
+**Root cause:** MiniMax-M2.7 appears to hang during long multi-turn tool-use chains. The API stops responding without error. DeepSeek-chat (used by Writer) showed the same pattern once. All timeouts occurred during active multi-tool runs, not during simple prompt processing.
+
+**Rule:** Bridge timeout is the safety net. Keep BRIDGE_TIMEOUT_MS conservative (120-300s). For agents with complex tool flows (CEO triage, researcher deep-research), consider a Pi-level keepalive or streaming heartbeat to distinguish "working slowly" from "hung".
+
+---
+
+## 2026-05-28: Agents publish same artifact multiple times under different types
+
+**What happened:** During M0.1, researchers and data agents published the same document 2-5 times under different artifact_types (report, research, brief, dataset, code, analysis, output, document). 56 MinIO objects total, estimated 25% redundant by content. Same content_hash appearing in multiple rows.
+
+**Root cause:** artifact_type is free-text in the write_artifact tool. Agents pick whatever label sounds appropriate on each call. No deduplication check on content_hash. No controlled vocabulary enforcement.
+
+**Rule:** Add content_hash deduplication in artifact service — reject writes with identical hash unless force flag is set. Define a controlled vocabulary for artifact_type and validate on write. Consider making the first write canonical and subsequent writes aliases.
+
+---
+
+## 2026-05-28: CEO creates escalation issues from stale crash-loop context
+
+**What happened:** After fixing the concurrent Pi spawn bug and restarting with clean containers, the CEO agent created 3 escalation issues (EVA-57, EVA-58, EVA-69) reporting "systemic adapter failures blocking research." These were false positives — the failures were from the pre-fix crash loop. Old Paperclip issue comments describing errors persisted in the CEO's context window.
+
+**Root cause:** Paperclip issue comments are append-only. When EVA-55 was created fresh, the CEO still saw comments from prior failed runs on related issues. The CEO correctly pattern-matched "adapter failures" but couldn't distinguish historical from current state.
+
+**Rule:** When restarting a milestone after infrastructure fixes, either (a) wipe the Paperclip instance entirely (scripts/wipe.sh) or (b) clean up error comments on active issues before re-running. Stale error context in Paperclip comments will contaminate agent decision-making.
