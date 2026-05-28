@@ -1,6 +1,7 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
 import { createLogger } from "./logger.mjs";
 
 
@@ -208,8 +209,13 @@ const server = http.createServer(async (req, res) => {
   // --- 1.4 Spawn error handling ---
   let pi;
   try {
+    const rawScope = wakeContext.issueId || runId || "scratch";
+    const issueScope = rawScope.replace(/[^a-zA-Z0-9_-]/g, "-");
+    const workDir = body.workspace || `/workspace/${issueScope}`;
+    fs.mkdirSync(workDir, { recursive: true });
+
     pi = spawn("pi", spawnArgs, {
-      cwd: body.workspace || "/workspace",
+      cwd: workDir,
       env: { ...process.env, TRACEPARENT: traceparent, ...(runId ? { PAPERCLIP_RUN_ID: runId } : {}) },
     });
   } catch (err) {
