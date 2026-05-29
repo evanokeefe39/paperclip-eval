@@ -4,6 +4,8 @@ const PAPERCLIP_COMPANY_ID = process.env.PAPERCLIP_COMPANY_ID || "";
 const PAPERCLIP_AGENT_ID = process.env.PAPERCLIP_AGENT_ID || "";
 const PAPERCLIP_RUN_ID = process.env.PAPERCLIP_RUN_ID || "";
 
+export const SELF_AGENT_ID = PAPERCLIP_AGENT_ID;
+
 export async function request(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<unknown> {
   if (!PAPERCLIP_API_KEY) throw new Error("PAPERCLIP_API_KEY not set");
   const headers: Record<string, string> = {
