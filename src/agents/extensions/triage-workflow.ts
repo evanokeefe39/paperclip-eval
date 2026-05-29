@@ -72,7 +72,8 @@ function logEvent(event: string, data?: Record<string, unknown>) {
 }
 
 export default function (pi: ExtensionAPI) {
-  if (AGENT_NAME !== "ceo") return;
+  // Disabled: running standard Paperclip heartbeat protocol without phase gates
+  return;
 
   phase = "TRIAGE";
   searchCount = 0;
