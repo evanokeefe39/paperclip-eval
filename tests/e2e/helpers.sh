@@ -341,15 +341,25 @@ require_stack() {
         exit 1
     fi
 
-    if ! wait_healthy "$CEO_BRIDGE_URL/health" 10; then
-        echo "[FATAL] CEO bridge not healthy at $CEO_BRIDGE_URL"
-        exit 1
-    fi
+    local agent_urls=("$CEO_BRIDGE_URL" "$RESEARCHER_BRIDGE_URL" "$DATA_BRIDGE_URL" "$WRITER_BRIDGE_URL")
+    local agent_names=("CEO" "Researcher" "Data" "Writer")
 
-    if ! wait_healthy "$RESEARCHER_BRIDGE_URL/health" 10; then
-        echo "[FATAL] Researcher bridge not healthy at $RESEARCHER_BRIDGE_URL"
-        exit 1
-    fi
+    for i in "${!agent_urls[@]}"; do
+        local url="${agent_urls[$i]}"
+        local name="${agent_names[$i]}"
+
+        if ! wait_healthy "$url/health" 15; then
+            echo "[FATAL] $name not healthy at $url"
+            exit 1
+        fi
+
+        local status
+        status=$(curl -sf "$url/health" 2>/dev/null | jq -r '.status // "unknown"')
+        if [ "$status" != "ok" ]; then
+            echo "[FATAL] $name status is '$status' (expected 'ok') — extensions may not have loaded"
+            exit 1
+        fi
+    done
 
     echo "  Stack healthy."
 

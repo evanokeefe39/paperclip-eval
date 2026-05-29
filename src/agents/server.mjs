@@ -379,7 +379,19 @@ server.listen(PORT, async () => {
   log("info", "server_start", { port: Number(PORT), provider: PI_PROVIDER, model: PI_MODEL, version: VERSION });
   try {
     await initServices();
-    log("info", "ready", { startup_ms: Date.now() - bootTime });
+
+    if (!AGENT_NAME) {
+      log("error", "missing_agent_name", { detail: "AGENT_NAME env var required — extensions will not load correctly" });
+      process.exit(1);
+    }
+
+    const extCount = services.resourceLoader.getExtensions().extensions.length;
+    if (extCount < 3) {
+      log("error", "insufficient_extensions", { count: extCount, minimum: 3, detail: "Expected paperclip + artifacts + agent-specific extensions" });
+      process.exit(1);
+    }
+
+    log("info", "ready", { startup_ms: Date.now() - bootTime, agent_name: AGENT_NAME, extensions: extCount });
   } catch (err) {
     log("error", "services_init_failed", { error: err.message });
     process.exit(1);
