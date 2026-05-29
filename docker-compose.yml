@@ -161,6 +161,7 @@ services:
       - .env
       - src/agents/ceo/.env
     environment:
+      AGENT_NAME: "ceo"
       BRIDGE_TIMEOUT_MS: "300000"
       ARTIFACT_SERVICE_URL: "http://artifact-service:8090"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://openobserve:5080/api/default"
@@ -184,6 +185,7 @@ services:
       - .env
       - src/agents/researcher/.env
     environment:
+      AGENT_NAME: "researcher"
       NVIDIA_NIM_API_KEY: "${NVIDIA_NIM_API_KEY}"
       FINDING_STYLE: "intelligence"
       ARTIFACT_SERVICE_URL: "http://artifact-service:8090"
@@ -208,6 +210,7 @@ services:
       - .env
       - src/agents/data/.env
     environment:
+      AGENT_NAME: "data"
       GROQ_API_KEY: "${GROQ_API_KEY}"
       NVIDIA_NIM_API_KEY: "${NVIDIA_NIM_API_KEY}"
       FINDING_STYLE: "data"
@@ -237,6 +240,7 @@ services:
       - .env
       - src/agents/writer/.env
     environment:
+      AGENT_NAME: "writer"
       ARTIFACT_SERVICE_URL: "http://artifact-service:8090"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://openobserve:5080/api/default"
       OTEL_EXPORTER_OTLP_HEADERS: "Authorization=Basic ${ZO_OTLP_AUTH}"
