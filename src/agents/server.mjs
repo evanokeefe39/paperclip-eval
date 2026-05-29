@@ -1,6 +1,6 @@
 import http from "node:http";
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { createLogger } from "./logger.mjs";
 
 const SDK_PATH = "/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.js";
@@ -25,6 +25,20 @@ const CWD = "/workspace/scratch";
 const AGENT_NAME = process.env.AGENT_NAME || "";
 const SERVICE_NAME = AGENT_NAME ? `${AGENT_NAME}-server` : "server";
 const logger = createLogger({ service: SERVICE_NAME });
+
+// --- Agent metadata (for /describe) ---
+
+let agentMeta = { name: AGENT_NAME, description: "", role: "", capabilities: "" };
+try {
+  const raw = readFileSync(`/app/${AGENT_NAME}/agent.json`, "utf-8");
+  const parsed = JSON.parse(raw);
+  agentMeta = {
+    name: parsed.name || AGENT_NAME,
+    description: parsed.title || "",
+    role: parsed.role || "",
+    capabilities: parsed.capabilities || "",
+  };
+} catch { /* agent.json not found — use defaults */ }
 
 function log(level, event, data = {}) {
   logger[level]({ event, ...data }, event);
@@ -199,6 +213,7 @@ async function processInvocation(body, traceId, requestStart) {
         output: event.message.usage.output || 0,
         cacheRead: event.message.usage.cacheRead || 0,
       });
+      trackRun(traceId, { turnCount: usageByTurn.length });
     }
   });
 
@@ -294,6 +309,70 @@ const server = http.createServer(async (req, res) => {
     }));
   }
 
+  if (req.method === "GET" && req.url === "/describe") {
+    const busy = processing && queue.length >= QUEUE_MAX_DEPTH;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({
+      name: agentMeta.name,
+      description: agentMeta.description,
+      role: agentMeta.role,
+      capabilities: agentMeta.capabilities,
+      model: `${PI_PROVIDER}/${PI_MODEL}`,
+      status: !services ? "starting" : busy ? "busy" : "ready",
+    }));
+  }
+
+  if (req.method === "GET" && req.url.startsWith("/status/")) {
+    const runId = req.url.slice(8).split("?")[0];
+    const run = runs.get(runId);
+    if (!run) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "not_found" }));
+    }
+    const startMs = run.startedAtMs || Date.parse(run.startedAt) || Date.now();
+    const durationMs = run.completedAt ? (Date.parse(run.completedAt) - startMs) : (Date.now() - startMs);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({
+      runId,
+      state: run.status,
+      startedAt: run.startedAt,
+      durationMs,
+      progress: { turnCount: run.turnCount || 0 },
+    }));
+  }
+
+  if (req.method === "GET" && req.url.startsWith("/result/")) {
+    const runId = req.url.slice(8).split("?")[0];
+    const run = runs.get(runId);
+    if (!run) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "not_found" }));
+    }
+    if (run.status === "queued" || run.status === "running") {
+      res.writeHead(409, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "still_running", state: run.status }));
+    }
+    const startMs = run.startedAtMs || Date.parse(run.startedAt) || Date.now();
+    const durationMs = run.completedAt ? (Date.parse(run.completedAt) - startMs) : (Date.now() - startMs);
+    const usage = run.usage || {};
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({
+      runId,
+      state: run.status === "timeout" ? "failed" : run.status,
+      output: run.output || "",
+      error: run.error || null,
+      usage: {
+        input: usage.inputTokens || 0,
+        output: usage.outputTokens || 0,
+        cacheRead: usage.cachedInputTokens || 0,
+        cost: 0,
+        turns: usage.turns || 0,
+      },
+      durationMs,
+      model: usage.model || `${PI_PROVIDER}/${PI_MODEL}`,
+    }));
+  }
+
   if (req.method === "GET" && req.url.startsWith("/runs/")) {
     const runId = req.url.slice(6).split("?")[0];
     const run = runs.get(runId);
@@ -347,15 +426,24 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ error: "queue_full", detail: `${queue.length}/${QUEUE_MAX_DEPTH}` }));
   }
 
+  const correlationId = body.correlationId || traceId;
+  const traceparent = body.traceparent || null;
+
   // Track run and respond 202 immediately
   trackRun(traceId, {
     status: "queued",
     startedAt: new Date().toISOString(),
+    startedAtMs: Date.now(),
     wakeReason: body.context?.wakeReason || "heartbeat",
+    correlationId,
+    traceparent,
     output: null,
     error: null,
     usage: null,
+    turnCount: 0,
   });
+
+  log("info", "request_accepted", { trace_id: traceId, correlation_id: correlationId, traceparent });
 
   res.writeHead(202, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ runId: traceId, status: "accepted" }));
