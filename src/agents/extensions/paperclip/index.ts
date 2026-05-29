@@ -5,6 +5,7 @@ import {
   resolveCompanyId,
   resolveAgentId,
   isConfigured,
+  SELF_AGENT_ID,
 } from "./_client.js";
 
 type ToolResult = {
@@ -22,6 +23,18 @@ function qs(params: Record<string, string | number | boolean | undefined | null>
   const entries = Object.entries(params).filter(([, v]) => v != null && v !== "");
   if (!entries.length) return "";
   return "?" + entries.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&");
+}
+
+const IS_CEO = process.env.AGENT_NAME === "ceo";
+
+function rejectSelfAssign(agentId: string | undefined): ToolResult | null {
+  if (!IS_CEO || !agentId || !SELF_AGENT_ID) return null;
+  if (agentId === SELF_AGENT_ID) {
+    return {
+      content: [{ type: "text" as const, text: "Self-assignment blocked: CEO must delegate to other agents, not self-assign." }],
+    };
+  }
+  return null;
 }
 
 const Uuid = Type.String({ format: "uuid" });
@@ -153,6 +166,8 @@ export default function (pi: ExtensionAPI) {
       labelIds: Type.Optional(Type.Array(Type.String(), { description: "Label UUIDs" })),
     }),
     async (_id, p) => {
+      const blocked = rejectSelfAssign(p.assigneeAgentId);
+      if (blocked) return blocked;
       const cid = resolveCompanyId(p.companyId);
       const { companyId: _, ...body } = p;
       return ok(await request("POST", `/companies/${cid}/issues`, body));
@@ -176,6 +191,8 @@ export default function (pi: ExtensionAPI) {
       interrupt: Type.Optional(Type.Boolean({ description: "Interrupt the currently running agent" })),
     }),
     async (_id, p) => {
+      const blocked = rejectSelfAssign(p.assigneeAgentId);
+      if (blocked) return blocked;
       const { issueId, ...body } = p;
       return ok(await request("PATCH", `/issues/${encodeURIComponent(issueId)}`, body));
     },
